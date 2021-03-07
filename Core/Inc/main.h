@@ -58,6 +58,52 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define EN_PWR_RPI_Pin GPIO_PIN_13
+#define EN_PWR_RPI_GPIO_Port GPIOC
+#define CLK_PWR_RPI_Pin GPIO_PIN_0
+#define CLK_PWR_RPI_GPIO_Port GPIOC
+#define SHUTDOWN_RPI_Pin GPIO_PIN_1
+#define SHUTDOWN_RPI_GPIO_Port GPIOC
+#define RUNNING_RPI_Pin GPIO_PIN_2
+#define RUNNING_RPI_GPIO_Port GPIOC
+#define DETECT_PWR_RPI_Pin GPIO_PIN_3
+#define DETECT_PWR_RPI_GPIO_Port GPIOC
+#define BAT_IMON_Pin GPIO_PIN_6
+#define BAT_IMON_GPIO_Port GPIOA
+#define HS1_Pin GPIO_PIN_4
+#define HS1_GPIO_Port GPIOC
+#define HS2_Pin GPIO_PIN_5
+#define HS2_GPIO_Port GPIOC
+#define Volant_Enable24V_Pin GPIO_PIN_10
+#define Volant_Enable24V_GPIO_Port GPIOD
+#define Volant_Status_Pin GPIO_PIN_11
+#define Volant_Status_GPIO_Port GPIOD
+#define UART_TXDEn_Pin GPIO_PIN_12
+#define UART_TXDEn_GPIO_Port GPIOD
+#define FT230_RESET_Pin GPIO_PIN_13
+#define FT230_RESET_GPIO_Port GPIOD
+#define PushButton_2_Pin GPIO_PIN_14
+#define PushButton_2_GPIO_Port GPIOD
+#define PushButton_1_Pin GPIO_PIN_15
+#define PushButton_1_GPIO_Port GPIOD
+#define HS3_Pin GPIO_PIN_6
+#define HS3_GPIO_Port GPIOC
+#define HS4_Pin GPIO_PIN_7
+#define HS4_GPIO_Port GPIOC
+#define INT_IO1_Pin GPIO_PIN_0
+#define INT_IO1_GPIO_Port GPIOD
+#define INT_IO2_Pin GPIO_PIN_1
+#define INT_IO2_GPIO_Port GPIOD
+#define USB_PROG_EN_Pin GPIO_PIN_3
+#define USB_PROG_EN_GPIO_Port GPIOD
+#define USB_Enable1_Pin GPIO_PIN_4
+#define USB_Enable1_GPIO_Port GPIOD
+#define USB_Enable2_Pin GPIO_PIN_5
+#define USB_Enable2_GPIO_Port GPIOD
+#define USB_Enable3_Pin GPIO_PIN_6
+#define USB_Enable3_GPIO_Port GPIOD
+#define USB_Enable4_Pin GPIO_PIN_7
+#define USB_Enable4_GPIO_Port GPIOD
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */

@@ -348,46 +348,46 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOE_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13|GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, EN_PWR_RPI_Pin|CLK_PWR_RPI_Pin|SHUTDOWN_RPI_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_10|GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_3
-                          |GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, Volant_Enable24V_Pin|UART_TXDEn_Pin|FT230_RESET_Pin|USB_PROG_EN_Pin
+                          |USB_Enable1_Pin|USB_Enable2_Pin|USB_Enable3_Pin|USB_Enable4_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : PC13 PC0 PC1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_0|GPIO_PIN_1;
+  /*Configure GPIO pins : EN_PWR_RPI_Pin CLK_PWR_RPI_Pin SHUTDOWN_RPI_Pin */
+  GPIO_InitStruct.Pin = EN_PWR_RPI_Pin|CLK_PWR_RPI_Pin|SHUTDOWN_RPI_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PC2 PC3 PC4 PC5
-                           PC6 PC7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5
-                          |GPIO_PIN_6|GPIO_PIN_7;
+  /*Configure GPIO pins : RUNNING_RPI_Pin DETECT_PWR_RPI_Pin HS1_Pin HS2_Pin
+                           HS3_Pin HS4_Pin */
+  GPIO_InitStruct.Pin = RUNNING_RPI_Pin|DETECT_PWR_RPI_Pin|HS1_Pin|HS2_Pin
+                          |HS3_Pin|HS4_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA6 */
-  GPIO_InitStruct.Pin = GPIO_PIN_6;
+  /*Configure GPIO pin : BAT_IMON_Pin */
+  GPIO_InitStruct.Pin = BAT_IMON_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(BAT_IMON_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PD10 PD12 PD13 PD3
-                           PD4 PD5 PD6 PD7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_10|GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_3
-                          |GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7;
+  /*Configure GPIO pins : Volant_Enable24V_Pin UART_TXDEn_Pin FT230_RESET_Pin USB_PROG_EN_Pin
+                           USB_Enable1_Pin USB_Enable2_Pin USB_Enable3_Pin USB_Enable4_Pin */
+  GPIO_InitStruct.Pin = Volant_Enable24V_Pin|UART_TXDEn_Pin|FT230_RESET_Pin|USB_PROG_EN_Pin
+                          |USB_Enable1_Pin|USB_Enable2_Pin|USB_Enable3_Pin|USB_Enable4_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PD11 PD14 PD15 PD0
-                           PD1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_11|GPIO_PIN_14|GPIO_PIN_15|GPIO_PIN_0
-                          |GPIO_PIN_1;
+  /*Configure GPIO pins : Volant_Status_Pin PushButton_2_Pin PushButton_1_Pin INT_IO1_Pin
+                           INT_IO2_Pin */
+  GPIO_InitStruct.Pin = Volant_Status_Pin|PushButton_2_Pin|PushButton_1_Pin|INT_IO1_Pin
+                          |INT_IO2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
