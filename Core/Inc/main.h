@@ -43,6 +43,17 @@ extern "C" {
 /* Exported constants --------------------------------------------------------*/
 /* USER CODE BEGIN EC */
 
+uint8_t timer_flag;
+
+uint8_t pb1_pressed;
+uint8_t pb2_pressed;
+
+uint8_t can1_recv_flag;
+
+CAN_TxHeaderTypeDef pHeader;
+CAN_RxHeaderTypeDef pRxHeader;
+uint8_t a, r;  // CAN mailboxes used for tx and rx
+
 /* USER CODE END EC */
 
 /* Exported macro ------------------------------------------------------------*/
@@ -68,8 +79,6 @@ void Error_Handler(void);
 #define RUNNING_RPI_GPIO_Port GPIOC
 #define DETECT_PWR_RPI_Pin GPIO_PIN_3
 #define DETECT_PWR_RPI_GPIO_Port GPIOC
-#define BAT_IMON_Pin GPIO_PIN_6
-#define BAT_IMON_GPIO_Port GPIOA
 #define HS1_Pin GPIO_PIN_4
 #define HS1_GPIO_Port GPIOC
 #define HS2_Pin GPIO_PIN_5
@@ -82,10 +91,12 @@ void Error_Handler(void);
 #define UART_TXDEn_GPIO_Port GPIOD
 #define FT230_RESET_Pin GPIO_PIN_13
 #define FT230_RESET_GPIO_Port GPIOD
-#define PushButton_2_Pin GPIO_PIN_14
-#define PushButton_2_GPIO_Port GPIOD
-#define PushButton_1_Pin GPIO_PIN_15
-#define PushButton_1_GPIO_Port GPIOD
+#define PB2_Pin GPIO_PIN_14
+#define PB2_GPIO_Port GPIOD
+#define PB2_EXTI_IRQn EXTI15_10_IRQn
+#define PB1_Pin GPIO_PIN_15
+#define PB1_GPIO_Port GPIOD
+#define PB1_EXTI_IRQn EXTI15_10_IRQn
 #define HS3_Pin GPIO_PIN_6
 #define HS3_GPIO_Port GPIOC
 #define HS4_Pin GPIO_PIN_7
@@ -113,5 +124,3 @@ void Error_Handler(void);
 #endif
 
 #endif /* __MAIN_H */
-
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

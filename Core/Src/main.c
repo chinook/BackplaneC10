@@ -32,6 +32,53 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+// I2C GPIO addresses
+#define GPIO0_ADDR 0x42
+#define GPIO1_ADDR 0x40
+
+#define GPIO_GP0 0x00
+#define GPIO_GP1 0x01
+#define GPIO_OLAT_GP0 0x02
+#define GPIO_OLAT_GP1 0x03
+#define GPIO_POL_GP0 0x04
+#define GPIO_POL_GP1 0x05
+#define GPIO_DIR_GP0 0x06
+#define GPIO_DIR_GP1 0x07
+#define GPIO_INT_GP0 0x08
+#define GPIO_INT_GP1 0x09
+
+#define GPIO_NORMAL 0x00
+#define GPIO_INVERTED 0x01
+
+#define GPIO_OUTPUT 0x00
+#define GPIO_INPUT 0x01
+
+// Board defines
+#define BOARD_C10_1 3
+#define BOARD_C10_2 2
+#define BOARD_C10_3 1
+#define BOARD_C9	0
+
+// Voltage defines
+#define VOLTAGE_3V3 3
+#define VOLTAGE_5V  2
+#define VOLTAGE_15V	1
+#define VOLTAGE_24V	0
+
+// LED defines
+enum LEDS
+{
+	LED_ERROR = 0,	// D7
+	LED_WARN,		// D8
+	LED_CAN,		// D9
+	LED4,			// D10
+	LED3,			// D11
+	LED2,			// D12
+	LED1,			// D13
+
+	NUM_LEDS
+};
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -40,15 +87,24 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+ADC_HandleTypeDef hadc1;
+
 CAN_HandleTypeDef hcan1;
 CAN_HandleTypeDef hcan2;
 
 I2C_HandleTypeDef hi2c1;
 I2C_HandleTypeDef hi2c3;
 
+TIM_HandleTypeDef htim3;
+
 UART_HandleTypeDef huart8;
 
 /* USER CODE BEGIN PV */
+
+// I2C GPIO registers
+uint8_t gpio0_gp0, gpio0_gp1, gpio1_gp0, gpio1_gp1;
+uint8_t gpio0_dir0, gpio0_dir1, gpio1_dir0, gpio1_dir1;
+uint8_t gpio0_pol0, gpio0_pol1, gpio1_pol0, gpio1_pol1;
 
 /* USER CODE END PV */
 
@@ -60,12 +116,287 @@ static void MX_CAN1_Init(void);
 static void MX_CAN2_Init(void);
 static void MX_I2C3_Init(void);
 static void MX_UART8_Init(void);
+static void MX_TIM3_Init(void);
+static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
+
+HAL_StatusTypeDef GPIO_SendI2C(uint8_t addr, uint8_t reg, uint8_t data);
+uint8_t GPIO_ReadI2C(uint8_t addr, uint8_t reg);
+
+// GPIOs
+
+void InitGPIOs();
+
+void DisableAllVoltages();
+void EnableVoltage(uint8_t board, uint8_t voltage);
+void DisableVoltage(uint8_t board, uint8_t voltage);
+
+void EnableAllBoardVoltages(uint8_t board);
+void DisableAllBoardVoltages(uint8_t board);
+
+void EnableVolant24V();
+void DisableVolant24V();
+
+void SetLed(uint8_t led, uint8_t value);
+void ToggleLed(uint8_t led);
+
+// CAN
+
+HAL_StatusTypeDef TransmitCAN(uint8_t id, uint8_t* buf, uint8_t size);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+HAL_StatusTypeDef GPIO_SendI2C(uint8_t addr, uint8_t reg, uint8_t data)
+{
+  uint8_t buf[2];
+
+  buf[0] = reg;
+  buf[1] = data;
+
+  return HAL_I2C_Master_Transmit(&hi2c1, addr, buf, 2, HAL_MAX_DELAY);
+}
+
+uint8_t GPIO_ReadI2C(uint8_t addr, uint8_t reg)
+{
+	HAL_StatusTypeDef ret;
+
+	uint8_t cmd[2];
+	cmd[0] = reg;
+
+	ret = HAL_I2C_Master_Transmit(&hi2c1, addr, cmd, 1, HAL_MAX_DELAY);
+	if (ret != HAL_OK)
+	{
+		// TODO
+	}
+
+	uint8_t buf[1];
+	ret = HAL_I2C_Master_Receive(&hi2c1, addr, buf, 1, HAL_MAX_DELAY);
+	if (ret != HAL_OK)
+	{
+		// TODO
+	}
+
+	return buf[0];
+}
+
+void InitGPIOs()
+{
+  //
+  // Default values for GPIO registers
+  //
+
+  // GPIO directions
+  gpio0_dir0 = 0;
+  gpio0_dir1 = 0b11110000;
+  gpio1_dir0 = 0;
+  gpio1_dir1 = 0;
+
+  // GPIO *input* polarity
+  gpio0_pol0 = 0;
+  gpio0_pol1 = 0;
+  gpio1_pol0 = 0;
+  gpio1_pol1 = 0;
+
+  // GPIO reset to 0
+  gpio0_gp0 = gpio0_gp1 = 0;
+  // Enable 3V3 and 5V have inverted enable logic (1 = disable for 5V and 3V3)
+  gpio1_gp0 = gpio1_gp1 = 0b11001100;
+
+  //
+  // Send values to GPIO
+  //
+
+  //HAL_StatusTypeDef ret;
+  //uint8_t buf[12];
+
+  GPIO_SendI2C(GPIO0_ADDR, GPIO_DIR_GP0, gpio0_dir0);
+  GPIO_SendI2C(GPIO0_ADDR, GPIO_DIR_GP1, gpio0_dir1);
+  GPIO_SendI2C(GPIO1_ADDR, GPIO_DIR_GP0, gpio1_dir0);
+  GPIO_SendI2C(GPIO1_ADDR, GPIO_DIR_GP1, gpio1_dir1);
+
+  GPIO_SendI2C(GPIO0_ADDR, GPIO_POL_GP0, gpio0_pol0);
+  GPIO_SendI2C(GPIO0_ADDR, GPIO_POL_GP1, gpio0_pol1);
+  GPIO_SendI2C(GPIO1_ADDR, GPIO_POL_GP0, gpio1_pol0);
+  GPIO_SendI2C(GPIO1_ADDR, GPIO_POL_GP1, gpio1_pol1);
+
+  GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+  GPIO_SendI2C(GPIO0_ADDR, GPIO_GP1, gpio0_gp1);
+  GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
+  GPIO_SendI2C(GPIO1_ADDR, GPIO_GP1, gpio1_gp1);
+
+}
+
+void DisableAllVoltages()
+{
+	gpio1_gp0 = 0b11001100;
+	gpio1_gp1 = 0b11001100;
+	GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
+	GPIO_SendI2C(GPIO1_ADDR, GPIO_GP1, gpio1_gp1);
+
+	// Disable Volant 24V
+	DisableVolant24V();
+}
+
+// board = 1,2,3,4
+//  0,1,2 = Board C10 1,2,3
+//  3     = Board C9
+void EnableVoltage(uint8_t board, uint8_t voltage)
+{
+	// Special case for board C9 - 24V,15V
+	if (board == BOARD_C9 && voltage == VOLTAGE_24V)
+	{
+		gpio1_gp0 |= (1 << 6);
+		GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
+	}
+	else if (board == BOARD_C9 && voltage == VOLTAGE_15V)
+	{
+		// No 15V on board C9
+		return;
+	}
+	unsigned value = board * 4 + voltage;
+	unsigned gp = value / (unsigned)8;
+	if (gp)
+	{
+		// Inverted logic for 5V and 3V3
+		if (voltage == VOLTAGE_5V || voltage == VOLTAGE_3V3)
+			gpio1_gp1 &= ~(1 << (value - 8));
+		else
+			gpio1_gp1 |= (1 << (value - 8));
+		GPIO_SendI2C(GPIO1_ADDR, GPIO_GP1, gpio1_gp1);
+	}
+	else
+	{
+		// Inverted logic for 5V and 3V3
+		if (voltage == VOLTAGE_5V || voltage == VOLTAGE_3V3)
+			gpio1_gp0 &= ~(1 << value);
+		else
+			gpio1_gp0 |= (1 << value);
+		GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
+	}
+}
+
+void DisableVoltage(uint8_t board, uint8_t voltage)
+{
+	// Special case for board C9 - 24V,15V
+	if (board == BOARD_C9 && voltage == VOLTAGE_24V)
+	{
+		gpio1_gp0 &= ~(1 << 6);
+		GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
+	}
+	else if (board == BOARD_C9 && voltage == VOLTAGE_15V)
+	{
+		// No 15V on board C9
+		return;
+	}
+	unsigned value = board * 4 + voltage;
+	unsigned gp = value / (unsigned)8;
+	if (gp)
+	{
+		// Inverted logic for 5V and 3V3
+		if (voltage == VOLTAGE_5V || voltage == VOLTAGE_3V3)
+			gpio1_gp1 |= (1 << (value - 8));
+		else
+			gpio1_gp1 &= ~(1 << (value - 8));
+		GPIO_SendI2C(GPIO1_ADDR, GPIO_GP1, gpio1_gp1);
+	}
+	else
+	{
+		// Inverted logic for 5V and 3V3
+		if (voltage == VOLTAGE_5V || voltage == VOLTAGE_3V3)
+			gpio1_gp0 |= (1 << value);
+		else
+			gpio1_gp0 &= ~(1 << value);
+		GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
+	}
+}
+
+void EnableAllBoardVoltages(uint8_t board)
+{
+	if (board == BOARD_C9)
+	{
+		EnableVoltage(board, VOLTAGE_3V3);
+		EnableVoltage(board, VOLTAGE_5V);
+		EnableVoltage(board, VOLTAGE_24V);
+	}
+	else
+	{
+		EnableVoltage(board, VOLTAGE_3V3);
+		EnableVoltage(board, VOLTAGE_5V);
+		EnableVoltage(board, VOLTAGE_15V);
+		EnableVoltage(board, VOLTAGE_24V);
+	}
+}
+
+void DisableAllBoardVoltages(uint8_t board)
+{
+	if (board == BOARD_C9)
+	{
+		DisableVoltage(board, VOLTAGE_3V3);
+		DisableVoltage(board, VOLTAGE_5V);
+		DisableVoltage(board, VOLTAGE_24V);
+	}
+	else
+	{
+		DisableVoltage(board, VOLTAGE_3V3);
+		DisableVoltage(board, VOLTAGE_5V);
+		DisableVoltage(board, VOLTAGE_15V);
+		DisableVoltage(board, VOLTAGE_24V);
+	}
+}
+
+void EnableVolant24V()
+{
+	HAL_GPIO_WritePin(Volant_Enable24V_GPIO_Port, Volant_Enable24V_Pin, 0);
+}
+
+void DisableVolant24V()
+{
+	HAL_GPIO_WritePin(Volant_Enable24V_GPIO_Port, Volant_Enable24V_Pin, 1);
+}
+
+void SetLed(uint8_t led, uint8_t value)
+{
+	if (led >= NUM_LEDS)
+		return;
+
+	if (value)
+		gpio0_gp0 |= (1 << led);
+	else
+		gpio0_gp0 &= ~(1 << led);
+
+	GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+}
+
+void ToggleLed(uint8_t led)
+{
+	if (led >= NUM_LEDS)
+		return;
+
+	uint8_t value = (gpio0_gp0 & (1 << led)) >> led;
+	SetLed(led, !value);
+}
+
+HAL_StatusTypeDef TransmitCAN(uint8_t id, uint8_t* buf, uint8_t size)
+{
+	CAN_TxHeaderTypeDef msg;
+	msg.StdId = id;
+	msg.IDE = CAN_ID_STD;
+	msg.RTR = CAN_RTR_DATA;
+	msg.DLC = size;
+	msg.TransmitGlobalTime = DISABLE;
+
+	uint32_t mb;
+	HAL_StatusTypeDef ret = HAL_CAN_AddTxMessage(&hcan1, &msg, buf, &mb);
+	if (ret != HAL_OK)
+		return ret;
+
+	// Update the CAN led
+	ToggleLed(LED_CAN);
+	return ret;
+}
 
 /* USER CODE END 0 */
 
@@ -76,6 +407,13 @@ static void MX_UART8_Init(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+
+	// Init global variables
+	timer_flag = 0;
+	pb1_pressed = 0;
+	pb2_pressed = 0;
+
+	can1_recv_flag = 0;
 
   /* USER CODE END 1 */
 
@@ -102,17 +440,135 @@ int main(void)
   MX_CAN2_Init();
   MX_I2C3_Init();
   MX_UART8_Init();
+  MX_TIM3_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
+
+  InitGPIOs();
+
+  DisableAllVoltages();
+
+  EnableVoltage(BOARD_C10_1, VOLTAGE_3V3);
+  EnableVoltage(BOARD_C10_1, VOLTAGE_5V);
+  EnableVoltage(BOARD_C10_1, VOLTAGE_24V);
+
+  EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
+  EnableVoltage(BOARD_C10_2, VOLTAGE_5V);
+
+  EnableVoltage(BOARD_C10_3, VOLTAGE_3V3);
+  EnableVoltage(BOARD_C10_3, VOLTAGE_5V);
+
+  // Enable 24V volant
+  EnableVolant24V();
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
+  //HAL_StatusTypeDef ret;
+
   while (1)
   {
+	  if (timer_flag)
+	  {
+		  timer_flag = 0;
+
+		  // Blink led warning as living-led
+		  ToggleLed(LED_WARN);
+
+		  // Send CAN frame
+		  static uint8_t x = 0;
+		  uint8_t data[4] = { 0,1,2,x++ };
+		  HAL_StatusTypeDef can_success = TransmitCAN(0xAA, data, 4);
+		  if (!can_success)
+		  {
+			  SetLed(LED_ERROR, 1);
+		  }
+	  }
+	  /*
+	  // Blink LED1
+	  gpio0_gp0 |= (1 << 3);
+	  GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+	  HAL_Delay(250);
+
+	  gpio0_gp0 &= ~(1 << 3);
+	  GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+	  HAL_Delay(250);
+	  */
+
+	  // Check which boards are connected
+	  uint8_t hs1 = HAL_GPIO_ReadPin(HS1_GPIO_Port, HS1_Pin);  // Board C10_1
+	  uint8_t hs2 = HAL_GPIO_ReadPin(HS2_GPIO_Port, HS2_Pin);  // Board C10_2
+	  uint8_t hs3 = HAL_GPIO_ReadPin(HS3_GPIO_Port, HS3_Pin);  // Board C10_3
+	  uint8_t hs4 = HAL_GPIO_ReadPin(HS4_GPIO_Port, HS4_Pin);  // Board C9
+	  // Update 4 leds based on connection status
+	  SetLed(LED1, hs1);
+	  SetLed(LED2, hs2);
+	  SetLed(LED3, hs3);
+	  SetLed(LED4, hs4);
+
+	  // Check if buttons pressed
+	  if (pb1_pressed)
+	  {
+		  uint8_t pb1_val = HAL_GPIO_ReadPin(PB1_GPIO_Port, PB1_Pin);
+		  if (pb1_val)
+		  {
+			  SetLed(LED1, 1);
+		  }
+		  else
+		  {
+			  SetLed(LED1, 0);
+			  pb1_pressed = 0;
+		  }
+	  }
+	  if (pb2_pressed)
+	  {
+		  uint8_t pb2_val = HAL_GPIO_ReadPin(PB2_GPIO_Port, PB2_Pin);
+		  if (pb2_val)
+		  {
+			  SetLed(LED1, 1);
+		  }
+		  else
+		  {
+			  SetLed(LED1, 0);
+			  pb2_pressed = 0;
+		  }
+		  SetLed(LED1, 1);
+	  }
+
+	  // Get Volant BTS428L2 status (low on error)
+	  uint8_t volant_status = HAL_GPIO_ReadPin(Volant_Status_GPIO_Port, Volant_Status_Pin);
+	  if (volant_status == 0)
+	  {
+		  // Disable volant voltage
+		  DisableVolant24V();
+		  // TODO: Error management
+		  // SetLed(LED_ERROR, 1);
+	  }
+
+	  // Get Battery IMON value
+	  /*
+	  HAL_ADC_Start(&hadc1);
+	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+	  uint16_t raw_imon = HAL_ADC_GetValue(&hadc1);
+	  */
+
+	  // Check messages received on CANA bus
+	  if (can1_recv_flag)
+	  {
+		  can1_recv_flag = 0;
+
+		  uint32_t id = pRxHeader.StdId;
+	  }
+
+	  // Execute main loop every 10ms
+	  HAL_Delay(10);
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
   }
   /* USER CODE END 3 */
 }
@@ -157,6 +613,57 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief ADC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC1_Init(void)
+{
+
+  /* USER CODE BEGIN ADC1_Init 0 */
+
+  /* USER CODE END ADC1_Init 0 */
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC1_Init 1 */
+
+  /* USER CODE END ADC1_Init 1 */
+  /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
+  */
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
+  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc1.Init.ScanConvMode = DISABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  */
+  sConfig.Channel = ADC_CHANNEL_6;
+  sConfig.Rank = 1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
+  // HAL_ADC_Start_IT(&hadc1);
+
+  /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
   * @brief CAN1 Initialization Function
   * @param None
   * @retval None
@@ -172,11 +679,11 @@ static void MX_CAN1_Init(void)
 
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 16;
+  hcan1.Init.Prescaler = 21;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
   hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan1.Init.TimeSeg1 = CAN_BS1_1TQ;
-  hcan1.Init.TimeSeg2 = CAN_BS2_1TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_12TQ;
+  hcan1.Init.TimeSeg2 = CAN_BS2_4TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
   hcan1.Init.AutoBusOff = DISABLE;
   hcan1.Init.AutoWakeUp = DISABLE;
@@ -188,6 +695,33 @@ static void MX_CAN1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN CAN1_Init 2 */
+
+  // CAN Filters explained : https://schulz-m.github.io/2017/03/23/stm32-can-id-filter/
+
+  CAN_FilterTypeDef sf;
+  sf.FilterMaskIdHigh = 0x0000;
+  sf.FilterMaskIdLow = 0x0000;
+  sf.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+  sf.FilterBank = 0;
+  sf.FilterMode = CAN_FILTERMODE_IDMASK;
+  sf.FilterScale = CAN_FILTERSCALE_32BIT;
+  sf.FilterActivation = CAN_FILTER_ENABLE;
+  if (HAL_CAN_ConfigFilter(&hcan1, &sf) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+  //if (HAL_CAN_RegisterCallback(&hcan1, HAL_CAN_RX_FIFO0_MSG_PENDING_CB_ID, can_irq))
+  //{
+  //	  Error_Handler();
+  //}
+  if (HAL_CAN_Start(&hcan1) != HAL_OK)
+  {
+      Error_Handler();
+  }
+  if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
+  {
+      Error_Handler();
+  }
 
   /* USER CODE END CAN1_Init 2 */
 
@@ -299,6 +833,51 @@ static void MX_I2C3_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 160;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 6000;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
   * @brief UART8 Initialization Function
   * @param None
   * @retval None
@@ -369,12 +948,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : BAT_IMON_Pin */
-  GPIO_InitStruct.Pin = BAT_IMON_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(BAT_IMON_GPIO_Port, &GPIO_InitStruct);
-
   /*Configure GPIO pins : Volant_Enable24V_Pin UART_TXDEn_Pin FT230_RESET_Pin USB_PROG_EN_Pin
                            USB_Enable1_Pin USB_Enable2_Pin USB_Enable3_Pin USB_Enable4_Pin */
   GPIO_InitStruct.Pin = Volant_Enable24V_Pin|UART_TXDEn_Pin|FT230_RESET_Pin|USB_PROG_EN_Pin
@@ -384,17 +957,42 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : Volant_Status_Pin PushButton_2_Pin PushButton_1_Pin INT_IO1_Pin
-                           INT_IO2_Pin */
-  GPIO_InitStruct.Pin = Volant_Status_Pin|PushButton_2_Pin|PushButton_1_Pin|INT_IO1_Pin
-                          |INT_IO2_Pin;
+  /*Configure GPIO pins : Volant_Status_Pin INT_IO1_Pin INT_IO2_Pin */
+  GPIO_InitStruct.Pin = Volant_Status_Pin|INT_IO1_Pin|INT_IO2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
+  /*Configure GPIO pins : PB2_Pin PB1_Pin */
+  GPIO_InitStruct.Pin = PB2_Pin|PB1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
 }
 
 /* USER CODE BEGIN 4 */
+
+// EXTI Line External Interrupt ISR Handler CallBack
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if(GPIO_Pin == GPIO_PIN_14) // PD_14
+    {
+    	// LED4
+    	gpio0_gp0 = (gpio0_gp0 ^ (1 << 5));
+    	GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+    }
+    else if (GPIO_Pin == GPIO_PIN_15) // PD_15
+    {
+    	// LED3
+    	gpio0_gp0 = (gpio0_gp0 ^ (1 << 6));
+    	GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+    }
+}
 
 /* USER CODE END 4 */
 
@@ -427,4 +1025,3 @@ void assert_failed(uint8_t *file, uint32_t line)
 }
 #endif /* USE_FULL_ASSERT */
 
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
