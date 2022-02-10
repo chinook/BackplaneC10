@@ -248,8 +248,9 @@ void EnableVoltage(uint8_t board, uint8_t voltage)
 	// Special case for board C9 - 24V,15V
 	if (board == BOARD_C9 && voltage == VOLTAGE_24V)
 	{
-		gpio1_gp0 |= (1 << 6);
+		gpio1_gp0 |= (1 << 1);
 		GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
+		return;
 	}
 	else if (board == BOARD_C9 && voltage == VOLTAGE_15V)
 	{
@@ -283,8 +284,9 @@ void DisableVoltage(uint8_t board, uint8_t voltage)
 	// Special case for board C9 - 24V,15V
 	if (board == BOARD_C9 && voltage == VOLTAGE_24V)
 	{
-		gpio1_gp0 &= ~(1 << 6);
+		gpio1_gp0 &= ~(1 << 1);
 		GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
+		return;
 	}
 	else if (board == BOARD_C9 && voltage == VOLTAGE_15V)
 	{
@@ -445,9 +447,32 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   InitGPIOs();
+  HAL_Delay(10);
 
   DisableAllVoltages();
+  HAL_Delay(10);
 
+  /*EnableVoltage(BOARD_C10_1, VOLTAGE_3V3);
+  EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
+  EnableVoltage(BOARD_C10_3, VOLTAGE_3V3);
+
+  EnableVoltage(BOARD_C10_1, VOLTAGE_5V);
+  EnableVoltage(BOARD_C10_2, VOLTAGE_5V);
+  EnableVoltage(BOARD_C10_3, VOLTAGE_5V);*/
+
+  EnableVoltage(BOARD_C9, VOLTAGE_3V3);
+  EnableVoltage(BOARD_C9, VOLTAGE_5V);
+  EnableVoltage(BOARD_C9, VOLTAGE_24V);
+
+  // EnableVoltage(BOARD_C10_1, VOLTAGE_15V);
+  // EnableVoltage(BOARD_C10_2, VOLTAGE_15V);
+  // EnableVoltage(BOARD_C10_3, VOLTAGE_15V);
+
+  // EnableVoltage(BOARD_C10_1, VOLTAGE_24V);
+  // EnableVoltage(BOARD_C10_2, VOLTAGE_24V);
+  // EnableVoltage(BOARD_C10_3, VOLTAGE_24V);
+
+  /*
   EnableVoltage(BOARD_C10_1, VOLTAGE_3V3);
   EnableVoltage(BOARD_C10_1, VOLTAGE_5V);
   EnableVoltage(BOARD_C10_1, VOLTAGE_24V);
@@ -460,7 +485,7 @@ int main(void)
 
   // Enable 24V volant
   EnableVolant24V();
-
+	*/
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -481,21 +506,15 @@ int main(void)
 		  static uint8_t x = 0;
 		  uint8_t data[4] = { 0,1,2,x++ };
 		  HAL_StatusTypeDef can_success = TransmitCAN(0xAA, data, 4);
-		  if (!can_success)
+		  if (can_success != HAL_OK)
 		  {
 			  SetLed(LED_ERROR, 1);
 		  }
+		  else
+		  {
+			  SetLed(LED_ERROR, 0);
+		  }
 	  }
-	  /*
-	  // Blink LED1
-	  gpio0_gp0 |= (1 << 3);
-	  GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
-	  HAL_Delay(250);
-
-	  gpio0_gp0 &= ~(1 << 3);
-	  GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
-	  HAL_Delay(250);
-	  */
 
 	  // Check which boards are connected
 	  uint8_t hs1 = HAL_GPIO_ReadPin(HS1_GPIO_Port, HS1_Pin);  // Board C10_1
@@ -503,39 +522,10 @@ int main(void)
 	  uint8_t hs3 = HAL_GPIO_ReadPin(HS3_GPIO_Port, HS3_Pin);  // Board C10_3
 	  uint8_t hs4 = HAL_GPIO_ReadPin(HS4_GPIO_Port, HS4_Pin);  // Board C9
 	  // Update 4 leds based on connection status
-	  SetLed(LED1, hs1);
-	  SetLed(LED2, hs2);
-	  SetLed(LED3, hs3);
-	  SetLed(LED4, hs4);
-
-	  // Check if buttons pressed
-	  if (pb1_pressed)
-	  {
-		  uint8_t pb1_val = HAL_GPIO_ReadPin(PB1_GPIO_Port, PB1_Pin);
-		  if (pb1_val)
-		  {
-			  SetLed(LED1, 1);
-		  }
-		  else
-		  {
-			  SetLed(LED1, 0);
-			  pb1_pressed = 0;
-		  }
-	  }
-	  if (pb2_pressed)
-	  {
-		  uint8_t pb2_val = HAL_GPIO_ReadPin(PB2_GPIO_Port, PB2_Pin);
-		  if (pb2_val)
-		  {
-			  SetLed(LED1, 1);
-		  }
-		  else
-		  {
-			  SetLed(LED1, 0);
-			  pb2_pressed = 0;
-		  }
-		  SetLed(LED1, 1);
-	  }
+	  //SetLed(LED1, hs1);
+	  //SetLed(LED2, hs2);
+	  //SetLed(LED3, hs3);
+	  //SetLed(LED4, hs4);
 
 	  // Get Volant BTS428L2 status (low on error)
 	  uint8_t volant_status = HAL_GPIO_ReadPin(Volant_Status_GPIO_Port, Volant_Status_Pin);
@@ -853,7 +843,7 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 160;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 6000;
+  htim3.Init.Period = 20000;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -872,7 +862,7 @@ static void MX_TIM3_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM3_Init 2 */
-
+  HAL_TIM_Base_Start_IT(&htim3);
   /* USER CODE END TIM3_Init 2 */
 
 }
@@ -965,7 +955,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pins : PB2_Pin PB1_Pin */
   GPIO_InitStruct.Pin = PB2_Pin|PB1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
@@ -983,14 +973,16 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     if(GPIO_Pin == GPIO_PIN_14) // PD_14
     {
     	// LED4
-    	gpio0_gp0 = (gpio0_gp0 ^ (1 << 5));
-    	GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+    	//gpio0_gp0 = (gpio0_gp0 ^ (1 << 5));
+    	//GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+    	ToggleLed(LED1);
     }
     else if (GPIO_Pin == GPIO_PIN_15) // PD_15
     {
     	// LED3
-    	gpio0_gp0 = (gpio0_gp0 ^ (1 << 6));
-    	GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+    	//gpio0_gp0 = (gpio0_gp0 ^ (1 << 6));
+    	//GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+    	ToggleLed(LED2);
     }
 }
 
