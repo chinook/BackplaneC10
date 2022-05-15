@@ -69,6 +69,8 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define Speaker_Pin GPIO_PIN_3
+#define Speaker_GPIO_Port GPIOE
 #define EN_PWR_RPI_Pin GPIO_PIN_13
 #define EN_PWR_RPI_GPIO_Port GPIOC
 #define CLK_PWR_RPI_Pin GPIO_PIN_0
