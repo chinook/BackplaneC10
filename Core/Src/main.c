@@ -36,6 +36,7 @@
 #define GPIO0_ADDR 0x42
 #define GPIO1_ADDR 0x40
 
+
 #define GPIO_GP0 0x00
 #define GPIO_GP1 0x01
 #define GPIO_OLAT_GP0 0x02
@@ -53,6 +54,22 @@
 #define GPIO_OUTPUT 0x00
 #define GPIO_INPUT 0x01
 
+// INA226
+#define INA226_BATT_ADDR 0x96
+#define INA226_VOLANT_ADDR 0x90
+#define INA226_C9_ADDR 0x80
+// TODO: Changer pour valeurs soudees
+#define INA226_C10_1_ADDR 0x82
+#define INA226_C10_2_ADDR 0x84
+#define INA226_C10_3_ADDR 0x86
+
+#define INA226_CONFIG_REG 0x00
+#define INA226_SHUNT_VOLT_REG 0x01
+#define INA226_BUS_VOLT_REG 0x02
+#define INA226_POWER_REG 0x03
+#define INA226_CURRENT_REG 0x04
+#define INA226_CALIB_REG 0x05
+
 // Board defines
 #define BOARD_C10_1 3
 #define BOARD_C10_2 2
@@ -62,8 +79,18 @@
 // Voltage defines
 #define VOLTAGE_3V3 3
 #define VOLTAGE_5V  2
-#define VOLTAGE_15V	1
-#define VOLTAGE_24V	0
+#define VOLTAGE_24V 0
+
+// INA indices
+#define VOLANT_INA 5
+#define BATT_INA 4
+#define BOARD_C10_1_INA BOARD_C10_1
+#define BOARD_C10_2_INA BOARD_C10_2
+#define BOARD_C10_3_INA BOARD_C10_3
+#define BOARD_C9_INA BOARD_C9
+
+static INA226_ADDRs[6] = { INA226_C9_ADDR, INA226_C10_3_ADDR, NA226_C10_2_ADDR, NA226_C10_1_ADDR, INA226_BATT_ADDR, INA226_VOLANT_ADDR };
+
 
 // LED defines
 enum LEDS
@@ -97,12 +124,17 @@ I2C_HandleTypeDef hi2c3;
 
 TIM_HandleTypeDef htim3;
 
+UART_HandleTypeDef huart2;
+
 /* USER CODE BEGIN PV */
 
 // I2C GPIO registers
 uint8_t gpio0_gp0, gpio0_gp1, gpio1_gp0, gpio1_gp1;
 uint8_t gpio0_dir0, gpio0_dir1, gpio1_dir0, gpio1_dir1;
 uint8_t gpio0_pol0, gpio0_pol1, gpio1_pol0, gpio1_pol1;
+
+// I2C INA226 registers
+uint16_t ina226_config = 0b0100000100100111;
 
 /* USER CODE END PV */
 
@@ -115,10 +147,14 @@ static void MX_CAN2_Init(void);
 static void MX_I2C3_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 HAL_StatusTypeDef GPIO_SendI2C(uint8_t addr, uint8_t reg, uint8_t data);
 uint8_t GPIO_ReadI2C(uint8_t addr, uint8_t reg);
+
+HAL_StatusTypeDef INA_SendI2C(uint8_t addr, uint8_t reg, uint16_t data);
+uint16_t INA_ReadI2C(uint8_t addr, uint8_t reg);
 
 // GPIOs
 
@@ -137,6 +173,17 @@ void DisableVolant24V();
 void SetLed(uint8_t led, uint8_t value);
 void ToggleLed(uint8_t led);
 
+void BeepSpeaker();
+
+HAL_StatusTypeDef SendUART(uint8_t* buffer, size_t size);
+void EnableFT230Tx();
+void DisableFT230Tx();
+void ResetFT230();
+
+uint16_t ReadCurrentINA226(uint8_t ina226_id);
+uint16_t ReadPowerINA226(uint8_t ina226_id);
+
+
 // CAN
 
 HAL_StatusTypeDef TransmitCAN(uint8_t id, uint8_t* buf, uint8_t size);
@@ -153,17 +200,17 @@ HAL_StatusTypeDef GPIO_SendI2C(uint8_t addr, uint8_t reg, uint8_t data)
   buf[0] = reg;
   buf[1] = data;
 
-  return HAL_I2C_Master_Transmit(&hi2c1, addr, buf, 2, HAL_MAX_DELAY);
+  return HAL_I2C_Master_Transmit(&hi2c1, addr, buf, sizeof(buf), HAL_MAX_DELAY);
 }
 
 uint8_t GPIO_ReadI2C(uint8_t addr, uint8_t reg)
 {
 	HAL_StatusTypeDef ret;
 
-	uint8_t cmd[2];
+	uint8_t cmd[1];
 	cmd[0] = reg;
 
-	ret = HAL_I2C_Master_Transmit(&hi2c1, addr, cmd, 1, HAL_MAX_DELAY);
+	ret = HAL_I2C_Master_Transmit(&hi2c1, addr, cmd, sizeof(cmd), HAL_MAX_DELAY);
 	if (ret != HAL_OK)
 	{
 		// TODO
@@ -177,6 +224,43 @@ uint8_t GPIO_ReadI2C(uint8_t addr, uint8_t reg)
 	}
 
 	return buf[0];
+}
+
+HAL_StatusTypeDef INA_SendI2C(uint8_t addr, uint8_t reg, uint16_t data)
+{
+	uint8_t buf[3];
+
+	buf[0] = reg;
+	buf[1] = (data >> 8) & 0xFF;
+	buf[2] = data & 0xFF;
+
+	return HAL_I2C_Master_Transmit(&hi2c3, addr, buf, sizeof(buf), HAL_MAX_DELAY);
+}
+
+uint16_t INA_ReadI2C(uint8_t addr, uint8_t reg)
+{
+	HAL_StatusTypeDef ret;
+
+	uint8_t cmd[1];
+	cmd[0] = reg;
+
+	ret = HAL_I2C_Master_Transmit(&hi2c3, addr, cmd, sizeof(cmd), HAL_MAX_DELAY);
+	if (ret != HAL_OK)
+	{
+		// TODO
+	}
+
+	// Reading 16bits for INA
+	uint8_t buf[2];
+	ret = HAL_I2C_Master_Receive(&hi2c3, addr, buf, sizeof(buf), HAL_MAX_DELAY);
+	if (ret != HAL_OK)
+	{
+		// TODO
+	}
+
+	// return buf[0];
+	uint16_t result = (buf[0] << 8) | buf[1];
+	return result;
 }
 
 void InitGPIOs()
@@ -209,20 +293,26 @@ void InitGPIOs()
   //HAL_StatusTypeDef ret;
   //uint8_t buf[12];
 
-  GPIO_SendI2C(GPIO0_ADDR, GPIO_DIR_GP0, gpio0_dir0);
-  GPIO_SendI2C(GPIO0_ADDR, GPIO_DIR_GP1, gpio0_dir1);
-  GPIO_SendI2C(GPIO1_ADDR, GPIO_DIR_GP0, gpio1_dir0);
-  GPIO_SendI2C(GPIO1_ADDR, GPIO_DIR_GP1, gpio1_dir1);
+  uint8_t error = 0;
+  error |= GPIO_SendI2C(GPIO0_ADDR, GPIO_DIR_GP0, gpio0_dir0);
+  error |= GPIO_SendI2C(GPIO0_ADDR, GPIO_DIR_GP1, gpio0_dir1);
+  error |= GPIO_SendI2C(GPIO1_ADDR, GPIO_DIR_GP0, gpio1_dir0);
+  error |= GPIO_SendI2C(GPIO1_ADDR, GPIO_DIR_GP1, gpio1_dir1);
 
-  GPIO_SendI2C(GPIO0_ADDR, GPIO_POL_GP0, gpio0_pol0);
-  GPIO_SendI2C(GPIO0_ADDR, GPIO_POL_GP1, gpio0_pol1);
-  GPIO_SendI2C(GPIO1_ADDR, GPIO_POL_GP0, gpio1_pol0);
-  GPIO_SendI2C(GPIO1_ADDR, GPIO_POL_GP1, gpio1_pol1);
+  error |= GPIO_SendI2C(GPIO0_ADDR, GPIO_POL_GP0, gpio0_pol0);
+  error |= GPIO_SendI2C(GPIO0_ADDR, GPIO_POL_GP1, gpio0_pol1);
+  error |= GPIO_SendI2C(GPIO1_ADDR, GPIO_POL_GP0, gpio1_pol0);
+  error |= GPIO_SendI2C(GPIO1_ADDR, GPIO_POL_GP1, gpio1_pol1);
 
-  GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
-  GPIO_SendI2C(GPIO0_ADDR, GPIO_GP1, gpio0_gp1);
-  GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
-  GPIO_SendI2C(GPIO1_ADDR, GPIO_GP1, gpio1_gp1);
+  error |= GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+  error |= GPIO_SendI2C(GPIO0_ADDR, GPIO_GP1, gpio0_gp1);
+  error |= GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
+  error |= GPIO_SendI2C(GPIO1_ADDR, GPIO_GP1, gpio1_gp1);
+
+  if (error)
+  {
+	  // TODO
+  }
 
 }
 
@@ -249,11 +339,7 @@ void EnableVoltage(uint8_t board, uint8_t voltage)
 		GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
 		return;
 	}
-	else if (board == BOARD_C9 && voltage == VOLTAGE_15V)
-	{
-		// No 15V on board C9
-		return;
-	}
+
 	unsigned value = board * 4 + voltage;
 	unsigned gp = value / (unsigned)8;
 	if (gp)
@@ -285,11 +371,7 @@ void DisableVoltage(uint8_t board, uint8_t voltage)
 		GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
 		return;
 	}
-	else if (board == BOARD_C9 && voltage == VOLTAGE_15V)
-	{
-		// No 15V on board C9
-		return;
-	}
+
 	unsigned value = board * 4 + voltage;
 	unsigned gp = value / (unsigned)8;
 	if (gp)
@@ -314,36 +396,16 @@ void DisableVoltage(uint8_t board, uint8_t voltage)
 
 void EnableAllBoardVoltages(uint8_t board)
 {
-	if (board == BOARD_C9)
-	{
-		EnableVoltage(board, VOLTAGE_3V3);
-		EnableVoltage(board, VOLTAGE_5V);
-		EnableVoltage(board, VOLTAGE_24V);
-	}
-	else
-	{
-		EnableVoltage(board, VOLTAGE_3V3);
-		EnableVoltage(board, VOLTAGE_5V);
-		EnableVoltage(board, VOLTAGE_15V);
-		EnableVoltage(board, VOLTAGE_24V);
-	}
+	EnableVoltage(board, VOLTAGE_3V3);
+	EnableVoltage(board, VOLTAGE_5V);
+	EnableVoltage(board, VOLTAGE_24V);
 }
 
 void DisableAllBoardVoltages(uint8_t board)
 {
-	if (board == BOARD_C9)
-	{
-		DisableVoltage(board, VOLTAGE_3V3);
-		DisableVoltage(board, VOLTAGE_5V);
-		DisableVoltage(board, VOLTAGE_24V);
-	}
-	else
-	{
-		DisableVoltage(board, VOLTAGE_3V3);
-		DisableVoltage(board, VOLTAGE_5V);
-		DisableVoltage(board, VOLTAGE_15V);
-		DisableVoltage(board, VOLTAGE_24V);
-	}
+	DisableVoltage(board, VOLTAGE_3V3);
+	DisableVoltage(board, VOLTAGE_5V);
+	DisableVoltage(board, VOLTAGE_24V);
 }
 
 void EnableVolant24V()
@@ -397,6 +459,46 @@ HAL_StatusTypeDef TransmitCAN(uint8_t id, uint8_t* buf, uint8_t size)
 	return ret;
 }
 
+void BeepSpeaker()
+{
+	HAL_GPIO_WritePin(Speaker_GPIO_Port, Speaker_Pin, 1);
+	HAL_Delay(50);
+	HAL_GPIO_WritePin(Speaker_GPIO_Port, Speaker_Pin, 0);
+}
+
+HAL_StatusTypeDef SendUART(uint8_t* buffer, size_t size)
+{
+	return HAL_UART_Transmit(&huart2, buffer, size, HAL_MAX_DELAY);
+}
+
+void EnableFT230Tx()
+{
+	HAL_GPIO_WritePin(UART_TXDEn_GPIO_Port, UART_TXDEn_Pin, 1);
+}
+void DisableFT230Tx()
+{
+	HAL_GPIO_WritePin(UART_TXDEn_GPIO_Port, UART_TXDEn_Pin, 0);
+}
+void ResetFT230()
+{
+	HAL_GPIO_WritePin(FT230_RESET_GPIO_Port, FT230_RESET_Pin, 1);
+	HAL_Delay(2);
+	HAL_GPIO_WritePin(FT230_RESET_GPIO_Port, FT230_RESET_Pin, 0);
+}
+
+uint16_t ReadCurrentINA226(uint8_t ina226_id)
+{
+	uint16_t current = INA_ReadI2C(INA_ADDRs[ina226_id], INA226_CURRENT_REG);
+	return current;
+}
+
+uint16_t ReadPowerINA226(uint8_t ina226_id)
+{
+	uint16_t power = INA_ReadI2C(INA_ADDRs[ina226_id], INA226_POWER_REG);
+	return power;
+}
+
+
 /* USER CODE END 0 */
 
 /**
@@ -440,6 +542,7 @@ int main(void)
   MX_I2C3_Init();
   MX_TIM3_Init();
   MX_ADC1_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
   InitGPIOs();
@@ -513,6 +616,15 @@ int main(void)
 		  else
 		  {
 			  SetLed(LED_ERROR, 0);
+		  }
+
+		  // Send UART Message
+		  uint8_t msg[] = "Hello World!";
+		  HAL_StatusTypeDef uart_success = SendUART(msg, sizeof(msg));
+		  if (uart_success != HAL_OK)
+		  {
+			  // TODO
+			  // ErrorHandler();
 		  }
 	  }
 
@@ -669,11 +781,11 @@ static void MX_CAN1_Init(void)
 
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 21;
+  hcan1.Init.Prescaler = 11;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
   hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan1.Init.TimeSeg1 = CAN_BS1_12TQ;
-  hcan1.Init.TimeSeg2 = CAN_BS2_4TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_10TQ;
+  hcan1.Init.TimeSeg2 = CAN_BS2_5TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
   hcan1.Init.AutoBusOff = DISABLE;
   hcan1.Init.AutoWakeUp = DISABLE;
@@ -868,6 +980,39 @@ static void MX_TIM3_Init(void)
 }
 
 /**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -914,14 +1059,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PA0 PA1 PA2 PA3 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : Volant_Enable24V_Pin UART_TXDEn_Pin FT230_RESET_Pin USB_PROG_EN_Pin
                            USB_Enable1_Pin USB_Enable2_Pin USB_Enable3_Pin USB_Enable4_Pin */
