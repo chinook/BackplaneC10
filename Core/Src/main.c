@@ -89,7 +89,7 @@
 #define BOARD_C10_3_INA BOARD_C10_3
 #define BOARD_C9_INA BOARD_C9
 
-static INA226_ADDRs[6] = { INA226_C9_ADDR, INA226_C10_3_ADDR, NA226_C10_2_ADDR, NA226_C10_1_ADDR, INA226_BATT_ADDR, INA226_VOLANT_ADDR };
+static uint32_t INA226_ADDRs[6] = { INA226_C9_ADDR, INA226_C10_3_ADDR, INA226_C10_2_ADDR, INA226_C10_1_ADDR, INA226_BATT_ADDR, INA226_VOLANT_ADDR };
 
 
 // LED defines
@@ -127,6 +127,17 @@ TIM_HandleTypeDef htim3;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+
+uint8_t timer_flag;
+
+uint8_t pb1_pressed;
+uint8_t pb2_pressed;
+
+uint8_t can1_recv_flag;
+
+CAN_TxHeaderTypeDef pHeader;
+CAN_RxHeaderTypeDef pRxHeader;
+uint8_t a, r;  // CAN mailboxes used for tx and rx
 
 // I2C GPIO registers
 uint8_t gpio0_gp0, gpio0_gp1, gpio1_gp0, gpio1_gp1;
@@ -488,13 +499,13 @@ void ResetFT230()
 
 uint16_t ReadCurrentINA226(uint8_t ina226_id)
 {
-	uint16_t current = INA_ReadI2C(INA_ADDRs[ina226_id], INA226_CURRENT_REG);
+	uint16_t current = INA_ReadI2C(INA226_ADDRs[ina226_id], INA226_CURRENT_REG);
 	return current;
 }
 
 uint16_t ReadPowerINA226(uint8_t ina226_id)
 {
-	uint16_t power = INA_ReadI2C(INA_ADDRs[ina226_id], INA226_POWER_REG);
+	uint16_t power = INA_ReadI2C(INA226_ADDRs[ina226_id], INA226_POWER_REG);
 	return power;
 }
 
@@ -563,9 +574,9 @@ int main(void)
   EnableVoltage(BOARD_C9, VOLTAGE_5V);
   EnableVoltage(BOARD_C9, VOLTAGE_24V);
 
-  EnableVoltage(BOARD_C10_1, VOLTAGE_3V3);
-  EnableVoltage(BOARD_C10_1, VOLTAGE_5V);
-  EnableVoltage(BOARD_C10_1, VOLTAGE_24V);
+  EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
+  EnableVoltage(BOARD_C10_2, VOLTAGE_5V);
+  EnableVoltage(BOARD_C10_2, VOLTAGE_24V);
 
   // EnableVoltage(BOARD_C10_1, VOLTAGE_15V);
   // EnableVoltage(BOARD_C10_2, VOLTAGE_15V);
@@ -694,7 +705,13 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 96;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
+  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLR = 2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -703,12 +720,12 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
   {
     Error_Handler();
   }
@@ -781,11 +798,11 @@ static void MX_CAN1_Init(void)
 
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 11;
+  hcan1.Init.Prescaler = 12;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
   hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan1.Init.TimeSeg1 = CAN_BS1_10TQ;
-  hcan1.Init.TimeSeg2 = CAN_BS2_5TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_11TQ;
+  hcan1.Init.TimeSeg2 = CAN_BS2_4TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
   hcan1.Init.AutoBusOff = DISABLE;
   hcan1.Init.AutoWakeUp = DISABLE;
@@ -845,11 +862,11 @@ static void MX_CAN2_Init(void)
 
   /* USER CODE END CAN2_Init 1 */
   hcan2.Instance = CAN2;
-  hcan2.Init.Prescaler = 16;
+  hcan2.Init.Prescaler = 12;
   hcan2.Init.Mode = CAN_MODE_NORMAL;
   hcan2.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan2.Init.TimeSeg1 = CAN_BS1_1TQ;
-  hcan2.Init.TimeSeg2 = CAN_BS2_1TQ;
+  hcan2.Init.TimeSeg1 = CAN_BS1_11TQ;
+  hcan2.Init.TimeSeg2 = CAN_BS2_4TQ;
   hcan2.Init.TimeTriggeredMode = DISABLE;
   hcan2.Init.AutoBusOff = DISABLE;
   hcan2.Init.AutoWakeUp = DISABLE;
