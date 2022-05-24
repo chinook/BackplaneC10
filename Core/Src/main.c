@@ -819,6 +819,8 @@ static void MX_CAN1_Init(void)
 
   /* USER CODE BEGIN CAN1_Init 1 */
 
+  // CAN Baudrate = 250kbps
+
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
   hcan1.Init.Prescaler = 12;
@@ -840,10 +842,20 @@ static void MX_CAN1_Init(void)
 
   // CAN Filters explained : https://schulz-m.github.io/2017/03/23/stm32-can-id-filter/
 
+  // Example filter 0xA0 -> 0xAF   0b1010 0000  ->  0b1010 1111
+
+
   CAN_FilterTypeDef sf;
-  // Filter all the STD CAN IDs
-  sf.FilterMaskIdHigh = 0x100<<5;
-  sf.FilterMaskIdLow = 0x0000;
+
+  // All common bits go into the ID register
+  sf.FilterIdHigh = 0;
+  sf.FilterIdLow = 0xA0;  // 0b 0000 0000 1010 0000
+
+  // Which bits to compare for filter
+  // Pour 0xAx on veut 0b1010 xxxx
+  sf.FilterMaskIdHigh = 0x00;
+  sf.FilterMaskIdLow = 0xFFF0; // 0b 1111 1111 1111 xxxx
+
   sf.FilterFIFOAssignment = CAN_FILTER_FIFO0;
   sf.FilterBank = 18; // Which filter to use from the assigned ones
   sf.FilterMode = CAN_FILTERMODE_IDMASK;
