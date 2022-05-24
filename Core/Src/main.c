@@ -135,9 +135,13 @@ uint8_t pb2_pressed;
 
 uint8_t can1_recv_flag;
 
-CAN_TxHeaderTypeDef pHeader;
+CAN_TxHeaderTypeDef pTxHeader;
 CAN_RxHeaderTypeDef pRxHeader;
-uint8_t a, r;  // CAN mailboxes used for tx and rx
+
+uint8_t txData[8];
+uint8_t rxData[8];
+
+uint32_t txMailbox;
 
 // I2C GPIO registers
 uint8_t gpio0_gp0, gpio0_gp1, gpio1_gp0, gpio1_gp1;
@@ -451,17 +455,36 @@ void ToggleLed(uint8_t led)
 	SetLed(led, !value);
 }
 
+// CAN Rx Callback
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan)
+{
+	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &pRxHeader, rxData) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	if (pRxHeader.StdId == 0xAA)
+	{
+
+	}
+	else if (pRxHeader.StdId == 0xBB)
+	{
+
+	}
+	// etc etc ..
+}
+
 HAL_StatusTypeDef TransmitCAN(uint8_t id, uint8_t* buf, uint8_t size)
 {
-	CAN_TxHeaderTypeDef msg;
-	msg.StdId = id;
-	msg.IDE = CAN_ID_STD;
-	msg.RTR = CAN_RTR_DATA;
-	msg.DLC = size;
-	msg.TransmitGlobalTime = DISABLE;
+	// CAN_TxHeaderTypeDef msg;
+	pTxHeader.StdId = id;
+	pTxHeader.IDE = CAN_ID_STD;
+	pTxHeader.RTR = CAN_RTR_DATA;
+	pTxHeader.DLC = size; // Number of bytes to send
+	pTxHeader.TransmitGlobalTime = DISABLE;
 
 	uint32_t mb;
-	HAL_StatusTypeDef ret = HAL_CAN_AddTxMessage(&hcan1, &msg, buf, &mb);
+	HAL_StatusTypeDef ret = HAL_CAN_AddTxMessage(&hcan1, &pTxHeader, buf, &mb);
 	if (ret != HAL_OK)
 		return ret;
 
@@ -818,13 +841,15 @@ static void MX_CAN1_Init(void)
   // CAN Filters explained : https://schulz-m.github.io/2017/03/23/stm32-can-id-filter/
 
   CAN_FilterTypeDef sf;
-  sf.FilterMaskIdHigh = 0x0000;
+  // Filter all the STD CAN IDs
+  sf.FilterMaskIdHigh = 0x100<<5;
   sf.FilterMaskIdLow = 0x0000;
   sf.FilterFIFOAssignment = CAN_FILTER_FIFO0;
-  sf.FilterBank = 0;
+  sf.FilterBank = 18; // Which filter to use from the assigned ones
   sf.FilterMode = CAN_FILTERMODE_IDMASK;
   sf.FilterScale = CAN_FILTERSCALE_32BIT;
   sf.FilterActivation = CAN_FILTER_ENABLE;
+  sf.SlaveStartFilterBank = 20; // How many filters to assign to CAN1
   if (HAL_CAN_ConfigFilter(&hcan1, &sf) != HAL_OK)
   {
 	  Error_Handler();

@@ -50,9 +50,10 @@ extern uint8_t pb2_pressed;
 
 extern uint8_t can1_recv_flag;
 
-extern CAN_TxHeaderTypeDef pHeader;
+extern CAN_TxHeaderTypeDef pTxHeader;
 extern CAN_RxHeaderTypeDef pRxHeader;
-extern uint8_t a, r;  // CAN mailboxes used for tx and rx
+
+extern uint32_t txMailbox;
 
 /* USER CODE END EC */
 
