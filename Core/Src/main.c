@@ -23,6 +23,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include "chinook_can_ids.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -64,8 +66,8 @@
 #define INA226_C10_3_ADDR 0x86
 
 #define INA226_CONFIG_REG 0x00
-#define INA226_SHUNT_VOLT_REG 0x01
-#define INA226_BUS_VOLT_REG 0x02
+#define INA226_SHUNT_VOLTAGE_REG 0x01
+#define INA226_BUS_VOLTAGE_REG 0x02
 #define INA226_POWER_REG 0x03
 #define INA226_CURRENT_REG 0x04
 #define INA226_CALIB_REG 0x05
@@ -89,6 +91,15 @@
 #define BOARD_C10_3_INA BOARD_C10_3
 #define BOARD_C9_INA BOARD_C9
 
+// INA226 constants
+#define INA226_RSHUNT 0.002f        // 2m ohm
+#define INA226_CURRENT_LSB 0.001f  // 1mA/bit
+#define INA226_SHUNT_VOLTAGE_LSB 0.0000025f // 2.5 uV
+#define INA226_BUS_VOLTAGE_LSB 0.00125f     // 1.25 mV
+const float INA226_POWER_LSB = 25.0f * INA226_CURRENT_LSB;
+
+
+#define NUM_INA226 6
 static uint32_t INA226_ADDRs[6] = { INA226_C9_ADDR, INA226_C10_3_ADDR, INA226_C10_2_ADDR, INA226_C10_1_ADDR, INA226_BATT_ADDR, INA226_VOLANT_ADDR };
 
 
@@ -104,6 +115,17 @@ enum LEDS
 	LED1,			// D13
 
 	NUM_LEDS
+};
+
+// State machine enum
+enum STATES
+{
+	STATE_INIT = 0,
+	STATE_ACQUISITION,
+	STATE_BOARD_CONTROL,
+	STATE_CAN,
+
+	STATE_ERROR = 0xFF
 };
 
 /* USER CODE END PD */
@@ -151,6 +173,25 @@ uint8_t gpio0_pol0, gpio0_pol1, gpio1_pol0, gpio1_pol1;
 // I2C INA226 registers
 uint16_t ina226_config = 0b0100000100100111;
 
+// Current state machine state
+uint32_t current_state = STATE_INIT;
+
+// Board control values
+uint8_t board_hs[4] = { 0, 0, 0, 0 }; // Connected board slots
+float board_voltages[4] = { 0.0f, 0.0f, 0.0f, 0.0f };  // C9, C10_3, C10_2, C10_1
+float board_currents[4] = { 0.0f, 0.0f, 0.0f, 0.0f };  // C9, C10_3, C10_2, C10_1
+float board_powers[4] = { 0.0f, 0.0f, 0.0f, 0.0f };    // C9, C10_3, C10_2, C10_1
+float batt_voltage = 0.0f;
+float batt_current = 0.0f;
+float batt_power = 0.0f;
+float volant_voltage = 0.0f;
+float volant_current = 0.0f;
+float volant_power = 0.0f;
+
+uint8_t volant_status = 1;  // 1 = no error,  0 = error
+
+uint8_t can_error = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -164,6 +205,16 @@ static void MX_TIM3_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
+
+// State machine control
+void ExecuteStateMachine();
+
+uint32_t DoStateInit();
+uint32_t DoStateBoardControl();
+uint32_t DoStateAcquisition();
+uint32_t DoStateCan();
+
+void DoStateError();
 
 HAL_StatusTypeDef GPIO_SendI2C(uint8_t addr, uint8_t reg, uint8_t data);
 uint8_t GPIO_ReadI2C(uint8_t addr, uint8_t reg);
@@ -195,8 +246,12 @@ void EnableFT230Tx();
 void DisableFT230Tx();
 void ResetFT230();
 
-uint16_t ReadCurrentINA226(uint8_t ina226_id);
-uint16_t ReadPowerINA226(uint8_t ina226_id);
+void InitAllINA226s();
+
+float ReadShuntVoltageINA226(uint8_t ina226_id);
+float ReadBusVoltageINA226(uint8_t ina226_id);
+float ReadCurrentINA226(uint8_t ina226_id);
+float ReadPowerINA226(uint8_t ina226_id);
 
 
 // CAN
@@ -207,6 +262,7 @@ HAL_StatusTypeDef TransmitCAN(uint8_t id, uint8_t* buf, uint8_t size);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
 
 HAL_StatusTypeDef GPIO_SendI2C(uint8_t addr, uint8_t reg, uint8_t data)
 {
@@ -520,16 +576,209 @@ void ResetFT230()
 	HAL_GPIO_WritePin(FT230_RESET_GPIO_Port, FT230_RESET_Pin, 0);
 }
 
-uint16_t ReadCurrentINA226(uint8_t ina226_id)
+void InitAllINA226s()
 {
-	uint16_t current = INA_ReadI2C(INA226_ADDRs[ina226_id], INA226_CURRENT_REG);
-	return current;
+	// Configuration register
+	// AVG mode set to 4 averages (everything else is default)
+	uint16_t config_reg_value = 0x4327;
+	for (int i = 0; i < NUM_INA226; ++i)
+	{
+		INA_SendI2C(INA226_ADDRs[i], INA226_CONFIG_REG, config_reg_value);
+	}
+
+	// Calibration register
+	typedef union
+	{
+		float cal_f;
+		uint32_t cal_i;
+	} CalPunning;
+	CalPunning cal_punning;
+
+	cal_punning.cal_f = 0.00052f / INA226_CURRENT_LSB * INA226_RSHUNT;
+	uint16_t cal_reg_value = (uint16_t)(cal_punning.cal_i & 0x0000FFFF);
+
+	for (int i = 0; i < NUM_INA226; ++i)
+	{
+		INA_SendI2C(INA226_ADDRs[i], INA226_CALIB_REG, cal_reg_value);
+	}
 }
 
-uint16_t ReadPowerINA226(uint8_t ina226_id)
+float ReadShuntVoltageINA226(uint8_t ina226_id)
+{
+	uint16_t shunt_voltage = INA_ReadI2C(INA226_ADDRs[ina226_id], INA226_BUS_VOLTAGE_REG);
+	return ((float)shunt_voltage) * INA226_SHUNT_VOLTAGE_LSB;
+}
+
+float ReadBusVoltageINA226(uint8_t ina226_id)
+{
+	uint16_t bus_voltage = INA_ReadI2C(INA226_ADDRs[ina226_id], INA226_BUS_VOLTAGE_REG);
+	return ((float)bus_voltage) * INA226_BUS_VOLTAGE_LSB;
+}
+
+float ReadCurrentINA226(uint8_t ina226_id)
+{
+	uint16_t current = INA_ReadI2C(INA226_ADDRs[ina226_id], INA226_CURRENT_REG);
+	return ((float)current) * INA226_CURRENT_LSB;
+}
+
+float ReadPowerINA226(uint8_t ina226_id)
 {
 	uint16_t power = INA_ReadI2C(INA226_ADDRs[ina226_id], INA226_POWER_REG);
-	return power;
+	return ((float)power) * INA226_POWER_LSB;
+}
+
+void ExecuteStateMachine()
+{
+	switch (current_state)
+	{
+	case STATE_INIT:
+		current_state = DoStateInit();
+		break;
+
+	case STATE_ACQUISITION:
+		current_state = DoStateAcquisition();
+		break;
+
+	case STATE_BOARD_CONTROL:
+		current_state = DoStateBoardControl();
+		break;
+
+	case STATE_CAN:
+		current_state = DoStateCan();
+		break;
+
+	case STATE_ERROR:
+		DoStateError();
+		// In case we escape the error handler, re-initialize
+		current_state = DoStateInit();
+		break;
+
+	default:
+		DoStateInit();
+		break;
+	};
+}
+
+uint32_t DoStateInit()
+{
+	// Init global variables
+	timer_flag = 0;
+	pb1_pressed = 0;
+	pb2_pressed = 0;
+
+	can1_recv_flag = 0;
+
+	volant_status = 1;
+	can_error = 0;
+
+	// Initialize GPIO values
+	InitGPIOs();
+	HAL_Delay(10);
+
+	DisableAllVoltages();
+	HAL_Delay(10);
+
+	InitAllINA226s();
+
+	return STATE_ACQUISITION;
+}
+
+uint32_t DoStateAcquisition()
+{
+	// Read HS signals and enable voltages according to slots used
+	board_hs[3] = HAL_GPIO_ReadPin(HS1_GPIO_Port, HS1_Pin);  // Board C10_1
+	board_hs[2] = HAL_GPIO_ReadPin(HS2_GPIO_Port, HS2_Pin);  // Board C10_2
+	board_hs[1] = HAL_GPIO_ReadPin(HS3_GPIO_Port, HS3_Pin);  // Board C10_3
+	board_hs[0] = HAL_GPIO_ReadPin(HS4_GPIO_Port, HS4_Pin);  // Board C9
+
+	// Read INA226 voltage and current values
+	for (int i = 0; i < 4; ++i)
+	{
+		board_voltages[i] = ReadBusVoltageINA226(i);
+		board_currents[i] = ReadCurrentINA226(i);
+		board_powers[i] = ReadPowerINA226(i);
+	}
+
+	batt_voltage = ReadBusVoltageINA226(BATT_INA);
+	batt_current = ReadCurrentINA226(BATT_INA);
+	batt_power = ReadPowerINA226(BATT_INA);
+
+	volant_voltage = ReadBusVoltageINA226(VOLANT_INA);
+	volant_current = ReadCurrentINA226(VOLANT_INA);
+	volant_power = ReadPowerINA226(VOLANT_INA);
+
+
+	volant_status = HAL_GPIO_ReadPin(Volant_Status_GPIO_Port, Volant_Status_Pin);
+
+
+	return STATE_BOARD_CONTROL;
+}
+
+uint32_t DoStateBoardControl()
+{
+	// Enable or disable voltages based on HS board slots values
+	/*
+	if (board_hs[0])
+	{
+		EnableVoltage(BOARD_C9, VOLTAGE_3V3);
+		EnableVoltage(BOARD_C9, VOLTAGE_5V);
+		EnableVoltage(BOARD_C9, VOLTAGE_24V);
+	}
+	*/
+
+	// TODO: (Marc) Don't resend every time, check if value has changed
+	EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
+	EnableVoltage(BOARD_C10_2, VOLTAGE_5V);
+	EnableVoltage(BOARD_C10_2, VOLTAGE_24V);
+
+
+	return STATE_CAN;
+}
+
+
+uint32_t DoStateCan()
+{
+	// Send all sensor values
+	HAL_StatusTypeDef can_success = HAL_OK;
+
+	can_success &= TransmitCAN(BACKPLANE_TOTAL_VOLTAGE, (uint8_t*)(&batt_voltage), 4);
+	can_success &= TransmitCAN(BACKPLANE_TOTAL_CURRENT, (uint8_t*)(&batt_current), 4);
+
+	can_success &= TransmitCAN(BACKPLANE_VOLANT_VOLTAGE, (uint8_t*)(&volant_voltage), 4);
+	can_success &= TransmitCAN(BACKPLANE_VOLANT_CURRENT, (uint8_t*)(&volant_current), 4);
+
+	float board_voltages_1[2] = { board_voltages[0], board_voltages[1] };
+	can_success &= TransmitCAN(BACKPLANE_BOARD_VOLTAGES_1, (uint8_t*)(&board_voltages_1), 8);
+	float board_voltages_2[2] = { board_voltages[2], board_voltages[3] };
+	can_success &= TransmitCAN(BACKPLANE_BOARD_VOLTAGES_2, (uint8_t*)(&board_voltages_2), 8);
+
+	float board_currents_1[2] = { board_currents[0], board_currents[1] };
+	can_success &= TransmitCAN(BACKPLANE_BOARD_CURRENTS_1, (uint8_t*)(&board_currents_1), 8);
+	float board_currents_2[2] = { board_currents[2], board_currents[3] };
+	can_success &= TransmitCAN(BACKPLANE_BOARD_CURRENTS_2, (uint8_t*)(&board_currents_2), 8);
+
+	can_success &= TransmitCAN(BACKPLANE_BOARD_SLOTS_HS, board_hs, 4);
+
+	can_success &= TransmitCAN(BACKPLANE_VOLANT_STATUS, &volant_status, 1);
+
+
+	if (can_success != HAL_OK)
+	{
+		SetLed(LED_ERROR, 1);
+		can_error = 1;
+	}
+	else
+	{
+		SetLed(LED_ERROR, 0);
+		can_error = 0;
+	}
+
+	return STATE_ACQUISITION;
+}
+
+void DoStateError()
+{
+	Error_Handler();
 }
 
 
@@ -542,13 +791,6 @@ uint16_t ReadPowerINA226(uint8_t ina226_id)
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
-	// Init global variables
-	timer_flag = 0;
-	pb1_pressed = 0;
-	pb2_pressed = 0;
-
-	can1_recv_flag = 0;
 
   /* USER CODE END 1 */
 
@@ -579,12 +821,6 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  InitGPIOs();
-  HAL_Delay(10);
-
-  DisableAllVoltages();
-  HAL_Delay(10);
-
   /*EnableVoltage(BOARD_C10_1, VOLTAGE_3V3);
   EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
   EnableVoltage(BOARD_C10_3, VOLTAGE_3V3);
@@ -592,7 +828,7 @@ int main(void)
   EnableVoltage(BOARD_C10_1, VOLTAGE_5V);
   EnableVoltage(BOARD_C10_2, VOLTAGE_5V);
   EnableVoltage(BOARD_C10_3, VOLTAGE_5V);*/
-
+/*
   EnableVoltage(BOARD_C9, VOLTAGE_3V3);
   EnableVoltage(BOARD_C9, VOLTAGE_5V);
   EnableVoltage(BOARD_C9, VOLTAGE_24V);
@@ -600,7 +836,7 @@ int main(void)
   EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
   EnableVoltage(BOARD_C10_2, VOLTAGE_5V);
   EnableVoltage(BOARD_C10_2, VOLTAGE_24V);
-
+*/
   // EnableVoltage(BOARD_C10_1, VOLTAGE_15V);
   // EnableVoltage(BOARD_C10_2, VOLTAGE_15V);
   // EnableVoltage(BOARD_C10_3, VOLTAGE_15V);
@@ -629,6 +865,22 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 
   //HAL_StatusTypeDef ret;
+  current_state = STATE_INIT;
+  while (1)
+  {
+	  ExecuteStateMachine();
+
+	  // TODO: (Marc) Should be replaced by a timer with better resolution
+	  HAL_Delay(5);
+
+	  // Blink LED to signify alive and working
+	  if (timer_flag)
+	  {
+		  timer_flag = 0;
+
+		  ToggleLed(LED1);
+	  }
+  }
 
   while (1)
   {
@@ -663,10 +915,10 @@ int main(void)
 	  }
 
 	  // Check which boards are connected
-	  uint8_t hs1 = HAL_GPIO_ReadPin(HS1_GPIO_Port, HS1_Pin);  // Board C10_1
-	  uint8_t hs2 = HAL_GPIO_ReadPin(HS2_GPIO_Port, HS2_Pin);  // Board C10_2
-	  uint8_t hs3 = HAL_GPIO_ReadPin(HS3_GPIO_Port, HS3_Pin);  // Board C10_3
-	  uint8_t hs4 = HAL_GPIO_ReadPin(HS4_GPIO_Port, HS4_Pin);  // Board C9
+	  // uint8_t hs1 = HAL_GPIO_ReadPin(HS1_GPIO_Port, HS1_Pin);  // Board C10_1
+	  // uint8_t hs2 = HAL_GPIO_ReadPin(HS2_GPIO_Port, HS2_Pin);  // Board C10_2
+	  // uint8_t hs3 = HAL_GPIO_ReadPin(HS3_GPIO_Port, HS3_Pin);  // Board C10_3
+	  // uint8_t hs4 = HAL_GPIO_ReadPin(HS4_GPIO_Port, HS4_Pin);  // Board C9
 	  // Update 4 leds based on connection status
 	  //SetLed(LED1, hs1);
 	  //SetLed(LED2, hs2);
@@ -674,7 +926,8 @@ int main(void)
 	  //SetLed(LED4, hs4);
 
 	  // Get Volant BTS428L2 status (low on error)
-	  uint8_t volant_status = HAL_GPIO_ReadPin(Volant_Status_GPIO_Port, Volant_Status_Pin);
+	  // uint8_t volant_status = HAL_GPIO_ReadPin(Volant_Status_GPIO_Port, Volant_Status_Pin);
+	  /*
 	  if (volant_status == 0)
 	  {
 		  // Disable volant voltage
@@ -682,6 +935,7 @@ int main(void)
 		  // TODO: Error management
 		  // SetLed(LED_ERROR, 1);
 	  }
+	  */
 
 	  // Get Battery IMON value
 	  /*
