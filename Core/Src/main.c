@@ -23,6 +23,10 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+
 #include "chinook_can_ids.h"
 
 /* USER CODE END Includes */
@@ -176,6 +180,9 @@ uint16_t ina226_config = 0b0100000100100111;
 // Current state machine state
 uint32_t current_state = STATE_INIT;
 
+uint8_t led1_value = 0;
+uint8_t led2_value = 0;
+
 // Board control values
 uint8_t board_hs[4] = { 0, 0, 0, 0 }; // Connected board slots
 float board_voltages[4] = { 0.0f, 0.0f, 0.0f, 0.0f };  // C9, C10_3, C10_2, C10_1
@@ -198,12 +205,12 @@ uint8_t can_error = 0;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
-static void MX_CAN1_Init(void);
 static void MX_CAN2_Init(void);
 static void MX_I2C3_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_CAN1_Init(void);
 /* USER CODE BEGIN PFP */
 
 // State machine control
@@ -512,6 +519,7 @@ void ToggleLed(uint8_t led)
 }
 
 // CAN Rx Callback
+/*
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan)
 {
 	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &pRxHeader, rxData) != HAL_OK)
@@ -529,10 +537,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan)
 	}
 	// etc etc ..
 }
+*/
 
 HAL_StatusTypeDef TransmitCAN(uint8_t id, uint8_t* buf, uint8_t size)
 {
 	// CAN_TxHeaderTypeDef msg;
+
 	pTxHeader.StdId = id;
 	pTxHeader.IDE = CAN_ID_STD;
 	pTxHeader.RTR = CAN_RTR_DATA;
@@ -542,11 +552,19 @@ HAL_StatusTypeDef TransmitCAN(uint8_t id, uint8_t* buf, uint8_t size)
 	uint32_t mb;
 	HAL_StatusTypeDef ret = HAL_CAN_AddTxMessage(&hcan1, &pTxHeader, buf, &mb);
 	if (ret != HAL_OK)
+	{
+		SetLed(LED_CAN, 1);
+		SetLed(LED_ERROR, 1);
 		return ret;
+	}
 
 	// Update the CAN led
-	ToggleLed(LED_CAN);
+	//ToggleLed(LED_CAN);
+	SetLed(LED_CAN, 0);
+
 	return ret;
+
+	return 0;
 }
 
 void BeepSpeaker()
@@ -741,6 +759,7 @@ uint32_t DoStateCan()
 	// Send all sensor values
 	HAL_StatusTypeDef can_success = HAL_OK;
 
+	/*
 	can_success &= TransmitCAN(BACKPLANE_TOTAL_VOLTAGE, (uint8_t*)(&batt_voltage), 4);
 	can_success &= TransmitCAN(BACKPLANE_TOTAL_CURRENT, (uint8_t*)(&batt_current), 4);
 
@@ -760,6 +779,7 @@ uint32_t DoStateCan()
 	can_success &= TransmitCAN(BACKPLANE_BOARD_SLOTS_HS, board_hs, 4);
 
 	can_success &= TransmitCAN(BACKPLANE_VOLANT_STATUS, &volant_status, 1);
+	*/
 
 
 	if (can_success != HAL_OK)
@@ -813,12 +833,12 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_I2C1_Init();
-  MX_CAN1_Init();
   MX_CAN2_Init();
   MX_I2C3_Init();
   MX_TIM3_Init();
   MX_ADC1_Init();
   MX_USART2_UART_Init();
+  MX_CAN1_Init();
   /* USER CODE BEGIN 2 */
 
   /*EnableVoltage(BOARD_C10_1, VOLTAGE_3V3);
@@ -864,6 +884,71 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
+  DoStateInit();
+
+  EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
+  EnableVoltage(BOARD_C10_2, VOLTAGE_5V);
+  EnableVoltage(BOARD_C10_2, VOLTAGE_24V);
+
+  EnableVoltage(BOARD_C10_1, VOLTAGE_3V3);
+  EnableVoltage(BOARD_C10_1, VOLTAGE_5V);
+  EnableVoltage(BOARD_C10_1, VOLTAGE_24V);
+
+  EnableVoltage(BOARD_C10_3, VOLTAGE_3V3);
+  EnableVoltage(BOARD_C10_3, VOLTAGE_5V);
+  EnableVoltage(BOARD_C10_3, VOLTAGE_24V);
+
+  EnableVolant24V();
+
+  uint8_t buf1[4] = {0};
+  uint8_t buf2[4] = {0};
+  uint32_t buf1_val = 0x200;
+  uint32_t buf2_val = 0x1;
+  memcpy(buf1, &buf1_val, 4);
+  memcpy(buf2, &buf2_val, 4);
+
+  while (1)
+  {
+	  // PD_14 -- PB2
+	  if (GPIO_PIN_SET == HAL_GPIO_ReadPin(PB2_GPIO_Port, PB2_Pin))
+	  {
+		  //HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_RESET);
+		  if (led1_value == 1)
+		  {
+			  led1_value = 0;
+			  SetLed(LED1, 0);
+		  }
+	  }
+	  // PD_15 -- PB1
+	  if (GPIO_PIN_SET == HAL_GPIO_ReadPin(PB1_GPIO_Port, PB1_Pin))
+	  {
+		  //HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
+		  if (led2_value == 1)
+		  {
+			  led2_value = 0;
+			  SetLed(LED2, 0);
+		  }
+	  }
+
+
+
+	  if (led1_value == 1)
+	  {
+		  TransmitCAN(0xAA, buf1, sizeof(buf1));
+	  }
+	  else if (led2_value == 1)
+	  {
+		  TransmitCAN(0xAA, buf2, sizeof(buf2));
+	  }
+	  else
+	  {
+		  static uint8_t buf0[4] = {0};
+		  TransmitCAN(0xAA, buf0, sizeof(buf0));
+	  }
+
+	  HAL_Delay(10);
+  }
+
   //HAL_StatusTypeDef ret;
   current_state = STATE_INIT;
   while (1)
@@ -892,6 +977,7 @@ int main(void)
 		  ToggleLed(LED_WARN);
 
 		  // Send CAN frame
+		  /*
 		  static uint8_t x = 0;
 		  uint8_t data[4] = { 0,1,2,x++ };
 		  HAL_StatusTypeDef can_success = TransmitCAN(0xAA, data, 4);
@@ -903,6 +989,7 @@ int main(void)
 		  {
 			  SetLed(LED_ERROR, 0);
 		  }
+		  */
 
 		  // Send UART Message
 		  uint8_t msg[] = "Hello World!";
@@ -1073,8 +1160,6 @@ static void MX_CAN1_Init(void)
 
   /* USER CODE BEGIN CAN1_Init 1 */
 
-  // CAN Baudrate = 250kbps
-
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
   hcan1.Init.Prescaler = 12;
@@ -1094,44 +1179,14 @@ static void MX_CAN1_Init(void)
   }
   /* USER CODE BEGIN CAN1_Init 2 */
 
-  // CAN Filters explained : https://schulz-m.github.io/2017/03/23/stm32-can-id-filter/
-
-  // Example filter 0xA0 -> 0xAF   0b1010 0000  ->  0b1010 1111
-
-
-  CAN_FilterTypeDef sf;
-
-  // All common bits go into the ID register
-  sf.FilterIdHigh = 0;
-  sf.FilterIdLow = 0xA0;  // 0b 0000 0000 1010 0000
-
-  // Which bits to compare for filter
-  // Pour 0xAx on veut 0b1010 xxxx
-  sf.FilterMaskIdHigh = 0x00;
-  sf.FilterMaskIdLow = 0xFFF0; // 0b 1111 1111 1111 xxxx
-
-  sf.FilterFIFOAssignment = CAN_FILTER_FIFO0;
-  sf.FilterBank = 18; // Which filter to use from the assigned ones
-  sf.FilterMode = CAN_FILTERMODE_IDMASK;
-  sf.FilterScale = CAN_FILTERSCALE_32BIT;
-  sf.FilterActivation = CAN_FILTER_ENABLE;
-  sf.SlaveStartFilterBank = 20; // How many filters to assign to CAN1
-  if (HAL_CAN_ConfigFilter(&hcan1, &sf) != HAL_OK)
-  {
-	  Error_Handler();
-  }
-  //if (HAL_CAN_RegisterCallback(&hcan1, HAL_CAN_RX_FIFO0_MSG_PENDING_CB_ID, can_irq))
-  //{
-  //	  Error_Handler();
-  //}
-  if (HAL_CAN_Start(&hcan1) != HAL_OK)
-  {
-      Error_Handler();
-  }
-  if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
-  {
-      Error_Handler();
-  }
+  	if (HAL_CAN_Start(&hcan1) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
+	{
+		Error_Handler();
+	}
 
   /* USER CODE END CAN1_Init 2 */
 
@@ -1400,19 +1455,25 @@ static void MX_GPIO_Init(void)
 // EXTI Line External Interrupt ISR Handler CallBack
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    if(GPIO_Pin == GPIO_PIN_14) // PD_14
+    if(GPIO_Pin == GPIO_PIN_14) // PD_14 -- PB2
     {
     	// LED4
     	//gpio0_gp0 = (gpio0_gp0 ^ (1 << 5));
     	//GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
-    	ToggleLed(LED1);
+    	//ToggleLed(LED1);
+    	//HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
+    	SetLed(LED1, 1);
+    	led1_value = 1;
     }
-    else if (GPIO_Pin == GPIO_PIN_15) // PD_15
+    else if (GPIO_Pin == GPIO_PIN_15) // PD_15 -- PB1
     {
     	// LED3
     	//gpio0_gp0 = (gpio0_gp0 ^ (1 << 6));
     	//GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
-    	ToggleLed(LED2);
+    	//ToggleLed(LED2);
+    	//HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET);
+    	SetLed(LED2, 1);
+    	led2_value = 1;
     }
 }
 
