@@ -898,6 +898,10 @@ int main(void)
   EnableVoltage(BOARD_C10_3, VOLTAGE_5V);
   EnableVoltage(BOARD_C10_3, VOLTAGE_24V);
 
+  EnableVoltage(BOARD_C9, VOLTAGE_3V3);
+  EnableVoltage(BOARD_C9, VOLTAGE_5V);
+  EnableVoltage(BOARD_C9, VOLTAGE_24V);
+
   EnableVolant24V();
 
   uint8_t buf1[4] = {0};
