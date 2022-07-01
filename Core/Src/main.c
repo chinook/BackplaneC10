@@ -149,6 +149,7 @@ I2C_HandleTypeDef hi2c1;
 I2C_HandleTypeDef hi2c3;
 
 TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim4;
 
 UART_HandleTypeDef huart2;
 
@@ -199,6 +200,8 @@ uint8_t volant_status = 1;  // 1 = no error,  0 = error
 
 uint8_t can_error = 0;
 
+uint8_t b_timer500ms_flag;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -211,6 +214,7 @@ static void MX_TIM3_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_CAN1_Init(void);
+static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 
 // State machine control
@@ -488,12 +492,12 @@ void DisableAllBoardVoltages(uint8_t board)
 
 void EnableVolant24V()
 {
-	HAL_GPIO_WritePin(Volant_Enable24V_GPIO_Port, Volant_Enable24V_Pin, 0);
+	HAL_GPIO_WritePin(Volant_Enable24V_GPIO_Port, Volant_Enable24V_Pin, 1);
 }
 
 void DisableVolant24V()
 {
-	HAL_GPIO_WritePin(Volant_Enable24V_GPIO_Port, Volant_Enable24V_Pin, 1);
+	HAL_GPIO_WritePin(Volant_Enable24V_GPIO_Port, Volant_Enable24V_Pin, 0);
 }
 
 void SetLed(uint8_t led, uint8_t value)
@@ -553,14 +557,14 @@ HAL_StatusTypeDef TransmitCAN(uint8_t id, uint8_t* buf, uint8_t size)
 	HAL_StatusTypeDef ret = HAL_CAN_AddTxMessage(&hcan1, &pTxHeader, buf, &mb);
 	if (ret != HAL_OK)
 	{
-		SetLed(LED_CAN, 1);
+		// SetLed(LED_CAN, 1);
 		SetLed(LED_ERROR, 1);
 		return ret;
 	}
 
 	// Update the CAN led
 	//ToggleLed(LED_CAN);
-	SetLed(LED_CAN, 0);
+	// SetLed(LED_CAN, 0);
 
 	return ret;
 
@@ -689,6 +693,8 @@ uint32_t DoStateInit()
 	volant_status = 1;
 	can_error = 0;
 
+	b_timer500ms_flag = 0;
+
 	// Initialize GPIO values
 	InitGPIOs();
 	HAL_Delay(10);
@@ -802,6 +808,69 @@ void DoStateError()
 }
 
 
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan)
+{
+	typedef union RxToInt_
+	{
+		struct
+		{
+			uint8_t bytes[4];
+		};
+		int32_t int_val;
+	} RxToInt;
+	static RxToInt rxToInt;
+
+	if (hcan->Instance == CAN1)
+	{
+		// Indicate CAN working with CAN led
+		//HAL_GPIO_TogglePin(LED_CANA_GPIO_Port, LED_CANA_Pin);
+		ToggleLed(LED_CAN);
+
+		if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &pRxHeader, rxData) != HAL_OK)
+		{
+			Error_Handler();
+		}
+
+		uint32_t can_data = rxData[0] | (rxData[1] << 8) | (rxData[2] << 16) | (rxData[3] << 24);
+
+		if (pRxHeader.StdId == MARIO_PITCH_MANUAL_CMD) // 0x71
+		{
+			if (can_data == 0x300)
+			{
+				SetLed(LED3, 1);
+			}
+			else if (can_data == 0x200)
+			{
+				SetLed(LED4, 1);
+			}
+			else if (can_data == 0x100)
+			{
+				SetLed(LED3, 0);
+				SetLed(LED4, 0);
+			}
+		}
+		/*
+		else if (pRxHeader.StdId == MARIO_PITCH_MODE_CMD)
+		{
+			uint8_t pitch_mode = rxData[0];
+		}
+		else if (pRxHeader.StdId == MARIO_MAST_MODE_CMD)
+		{
+			uint8_t mast_mode = rxData[0];
+		}
+		else
+		{
+			// Unknown CAN ID
+		}
+		*/
+	}
+	else
+	{
+		// Wrong CAN interface
+	}
+}
+
+
 /* USER CODE END 0 */
 
 /**
@@ -839,7 +908,10 @@ int main(void)
   MX_ADC1_Init();
   MX_USART2_UART_Init();
   MX_CAN1_Init();
+  MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
+
+  HAL_TIM_Base_Start_IT(&htim4);
 
   /*EnableVoltage(BOARD_C10_1, VOLTAGE_3V3);
   EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
@@ -913,6 +985,14 @@ int main(void)
 
   while (1)
   {
+	  // Alive blink led
+	  if (b_timer500ms_flag == 1)
+	  {
+		  b_timer500ms_flag = 0;
+
+		  ToggleLed(LED1);
+	  }
+
 	  // PD_14 -- PB2
 	  if (GPIO_PIN_SET == HAL_GPIO_ReadPin(PB2_GPIO_Port, PB2_Pin))
 	  {
@@ -1183,6 +1263,48 @@ static void MX_CAN1_Init(void)
   }
   /* USER CODE BEGIN CAN1_Init 2 */
 
+  /*
+  CAN_FilterTypeDef sf_fifo0;
+  	// All common bits go into the ID register
+  	sf_fifo0.FilterIdHigh = 0x0000;
+  	sf_fifo0.FilterIdLow = 0x0000;
+
+  	// Which bits to compare for filter
+  	sf_fifo0.FilterMaskIdHigh = 0x0000;
+  	sf_fifo0.FilterMaskIdLow = 0x0000;
+
+  	sf_fifo0.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+  	sf_fifo0.FilterBank = 2; // Which filter to use from the assigned ones
+  	sf_fifo0.FilterMode = CAN_FILTERMODE_IDMASK;
+  	sf_fifo0.FilterScale = CAN_FILTERSCALE_32BIT;
+  	sf_fifo0.FilterActivation = CAN_FILTER_ENABLE;
+  	sf_fifo0.SlaveStartFilterBank = 20; // How many filters to assign to CAN1
+  	if (HAL_CAN_ConfigFilter(&hcan1, &sf_fifo0) != HAL_OK)
+  	{
+  	  Error_Handler();
+  	}
+  	*/
+
+    CAN_FilterTypeDef sf_fifo0;
+	// All common bits go into the ID register
+	sf_fifo0.FilterIdHigh = BACKPLANE_FIFO0_RX_FILTER_ID_HIGH;
+	sf_fifo0.FilterIdLow = BACKPLANE_FIFO0_RX_FILTER_ID_LOW;
+
+	// Which bits to compare for filter
+	sf_fifo0.FilterMaskIdHigh = BACKPLANE_FIFO0_RX_FILTER_MASK_HIGH;
+	sf_fifo0.FilterMaskIdLow = BACKPLANE_FIFO0_RX_FILTER_MASK_LOW;
+
+	sf_fifo0.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+	sf_fifo0.FilterBank = 2; // Which filter to use from the assigned ones
+	sf_fifo0.FilterMode = CAN_FILTERMODE_IDMASK;
+	sf_fifo0.FilterScale = CAN_FILTERSCALE_32BIT;
+	sf_fifo0.FilterActivation = CAN_FILTER_ENABLE;
+	sf_fifo0.SlaveStartFilterBank = 20; // How many filters to assign to CAN1
+	if (HAL_CAN_ConfigFilter(&hcan1, &sf_fifo0) != HAL_OK)
+	{
+	  Error_Handler();
+	}
+
   	if (HAL_CAN_Start(&hcan1) != HAL_OK)
 	{
 		Error_Handler();
@@ -1343,6 +1465,51 @@ static void MX_TIM3_Init(void)
   /* USER CODE BEGIN TIM3_Init 2 */
   HAL_TIM_Base_Start_IT(&htim3);
   /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
+  * @brief TIM4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM4_Init(void)
+{
+
+  /* USER CODE BEGIN TIM4_Init 0 */
+
+  /* USER CODE END TIM4_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM4_Init 1 */
+
+  /* USER CODE END TIM4_Init 1 */
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 480;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 50000;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM4_Init 2 */
+
+  /* USER CODE END TIM4_Init 2 */
 
 }
 
