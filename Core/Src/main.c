@@ -143,7 +143,6 @@ enum STATES
 ADC_HandleTypeDef hadc1;
 
 CAN_HandleTypeDef hcan1;
-CAN_HandleTypeDef hcan2;
 
 I2C_HandleTypeDef hi2c1;
 I2C_HandleTypeDef hi2c3;
@@ -202,13 +201,20 @@ uint8_t can_error = 0;
 
 uint8_t b_timer500ms_flag;
 
+
+// TEMP TEMP
+uint8_t pb1_update;
+uint8_t pb2_update;
+uint8_t pb1_value;
+uint8_t pb2_value;
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
-static void MX_CAN2_Init(void);
 static void MX_I2C3_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_ADC1_Init(void);
@@ -267,7 +273,7 @@ float ReadPowerINA226(uint8_t ina226_id);
 
 // CAN
 
-HAL_StatusTypeDef TransmitCAN(uint8_t id, uint8_t* buf, uint8_t size);
+HAL_StatusTypeDef TransmitCAN(uint32_t id, uint8_t* buf, uint8_t size);
 
 /* USER CODE END PFP */
 
@@ -543,7 +549,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan)
 }
 */
 
-HAL_StatusTypeDef TransmitCAN(uint8_t id, uint8_t* buf, uint8_t size)
+HAL_StatusTypeDef TransmitCAN(uint32_t id, uint8_t* buf, uint8_t size)
 {
 	// CAN_TxHeaderTypeDef msg;
 
@@ -788,6 +794,7 @@ uint32_t DoStateCan()
 	*/
 
 
+	/*
 	if (can_success != HAL_OK)
 	{
 		SetLed(LED_ERROR, 1);
@@ -798,6 +805,7 @@ uint32_t DoStateCan()
 		SetLed(LED_ERROR, 0);
 		can_error = 0;
 	}
+	*/
 
 	return STATE_ACQUISITION;
 }
@@ -848,6 +856,10 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan)
 				SetLed(LED3, 0);
 				SetLed(LED4, 0);
 			}
+		}
+		else if (pRxHeader.StdId == MARIO_BUZZER_CMD) // 0x81
+		{
+			ToggleLed(LED2);
 		}
 		/*
 		else if (pRxHeader.StdId == MARIO_PITCH_MODE_CMD)
@@ -902,7 +914,6 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_I2C1_Init();
-  MX_CAN2_Init();
   MX_I2C3_Init();
   MX_TIM3_Init();
   MX_ADC1_Init();
@@ -983,6 +994,68 @@ int main(void)
   memcpy(buf1, &buf1_val, 4);
   memcpy(buf2, &buf2_val, 4);
 
+  uint8_t buf[4];
+  uint32_t dir_stop = MOTOR_DIRECTION_STOP;
+  uint32_t dir_left = MOTOR_DIRECTION_LEFT;
+  uint32_t dir_right = MOTOR_DIRECTION_RIGHT;
+
+  while (1)
+  {
+	  HAL_Delay(10);
+
+	  // Alive blink led
+	  if (b_timer500ms_flag == 1)
+	  {
+		  b_timer500ms_flag = 0;
+
+		  ToggleLed(LED1);
+	  }
+
+	  uint8_t buf[4];
+
+	  if(GPIO_PIN_SET == HAL_GPIO_ReadPin(PB2_GPIO_Port, PB2_Pin)) // PD_14 -- PB2
+	  {
+		//HAL_GPIO_TogglePin(LED4_GPIO_Port, LED4_Pin);
+		//HAL_GPIO_WritePin(LED4_GPIO_Port, LED4_Pin, GPIO_PIN_SET);
+		  if (pb2_value == 1)
+		  {
+			  pb2_value = 0;
+			  // HAL_GPIO_WritePin(LED4_GPIO_Port, LED4_Pin, GPIO_PIN_RESET);
+			  SetLed(LED2, 0);
+
+			  memcpy(buf, &dir_stop, 4);
+			  TransmitCAN(0x71, buf, 4);
+		  }
+	  }
+	  if (GPIO_PIN_SET == HAL_GPIO_ReadPin(PB1_GPIO_Port, PB1_Pin)) // PD_15 -- PB1
+	  {
+		//HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin);
+		//HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_SET);
+		  if (pb1_value == 1)
+		  {
+			  pb1_value = 0;
+			  // HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_RESET);
+			  SetLed(LED3, 0);
+
+			  memcpy(buf, &dir_stop, 4);
+			  TransmitCAN(0x71, buf, 4);
+		  }
+	  }
+
+	  if (pb1_update)
+	  {
+		  memcpy(buf, &dir_left, 4);
+		  TransmitCAN(0x71, buf, 4);
+		  pb1_update = 0;
+	  }
+	  if (pb2_update)
+	  {
+		  memcpy(buf, &dir_right, 4);
+		  TransmitCAN(0x71, buf, 4);
+		  pb2_update = 0;
+	  }
+  }
+
   while (1)
   {
 	  // Alive blink led
@@ -1018,16 +1091,16 @@ int main(void)
 
 	  if (led1_value == 1)
 	  {
-		  TransmitCAN(0xAA, buf1, sizeof(buf1));
+		  //TransmitCAN(0xAA, buf1, sizeof(buf1));
 	  }
 	  else if (led2_value == 1)
 	  {
-		  TransmitCAN(0xAA, buf2, sizeof(buf2));
+		  //TransmitCAN(0xAA, buf2, sizeof(buf2));
 	  }
 	  else
 	  {
 		  static uint8_t buf0[4] = {0};
-		  TransmitCAN(0xAA, buf0, sizeof(buf0));
+		  //TransmitCAN(0xAA, buf0, sizeof(buf0));
 	  }
 
 	  HAL_Delay(10);
@@ -1248,7 +1321,7 @@ static void MX_CAN1_Init(void)
   hcan1.Instance = CAN1;
   hcan1.Init.Prescaler = 12;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
-  hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan1.Init.SyncJumpWidth = CAN_SJW_3TQ;
   hcan1.Init.TimeSeg1 = CAN_BS1_11TQ;
   hcan1.Init.TimeSeg2 = CAN_BS2_4TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
@@ -1263,27 +1336,30 @@ static void MX_CAN1_Init(void)
   }
   /* USER CODE BEGIN CAN1_Init 2 */
 
-  /*
-  CAN_FilterTypeDef sf_fifo0;
+/*
+  CAN_FilterTypeDef filter_all;
   	// All common bits go into the ID register
-  	sf_fifo0.FilterIdHigh = 0x0000;
-  	sf_fifo0.FilterIdLow = 0x0000;
+  filter_all.FilterIdHigh = 0x0000;
+  filter_all.FilterIdLow = 0x0000;
 
   	// Which bits to compare for filter
-  	sf_fifo0.FilterMaskIdHigh = 0x0000;
-  	sf_fifo0.FilterMaskIdLow = 0x0000;
+  filter_all.FilterMaskIdHigh = 0x0000;
+  filter_all.FilterMaskIdLow = 0x0000;
 
-  	sf_fifo0.FilterFIFOAssignment = CAN_FILTER_FIFO0;
-  	sf_fifo0.FilterBank = 2; // Which filter to use from the assigned ones
-  	sf_fifo0.FilterMode = CAN_FILTERMODE_IDMASK;
-  	sf_fifo0.FilterScale = CAN_FILTERSCALE_32BIT;
-  	sf_fifo0.FilterActivation = CAN_FILTER_ENABLE;
-  	sf_fifo0.SlaveStartFilterBank = 20; // How many filters to assign to CAN1
-  	if (HAL_CAN_ConfigFilter(&hcan1, &sf_fifo0) != HAL_OK)
+  filter_all.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+  filter_all.FilterBank = 2; // Which filter to use from the assigned ones
+  filter_all.FilterMode = CAN_FILTERMODE_IDMASK;
+  filter_all.FilterScale = CAN_FILTERSCALE_32BIT;
+  filter_all.FilterActivation = CAN_FILTER_ENABLE;
+  filter_all.SlaveStartFilterBank = 20; // How many filters to assign to CAN1
+  	if (HAL_CAN_ConfigFilter(&hcan1, &filter_all) != HAL_OK)
   	{
   	  Error_Handler();
   	}
   	*/
+
+
+
 
     CAN_FilterTypeDef sf_fifo0;
 	// All common bits go into the ID register
@@ -1295,15 +1371,37 @@ static void MX_CAN1_Init(void)
 	sf_fifo0.FilterMaskIdLow = BACKPLANE_FIFO0_RX_FILTER_MASK_LOW;
 
 	sf_fifo0.FilterFIFOAssignment = CAN_FILTER_FIFO0;
-	sf_fifo0.FilterBank = 2; // Which filter to use from the assigned ones
+	sf_fifo0.FilterBank = 0; // Which filter to use from the assigned ones
 	sf_fifo0.FilterMode = CAN_FILTERMODE_IDMASK;
 	sf_fifo0.FilterScale = CAN_FILTERSCALE_32BIT;
 	sf_fifo0.FilterActivation = CAN_FILTER_ENABLE;
-	sf_fifo0.SlaveStartFilterBank = 20; // How many filters to assign to CAN1
+	sf_fifo0.SlaveStartFilterBank = 14; // How many filters to assign to CAN1
 	if (HAL_CAN_ConfigFilter(&hcan1, &sf_fifo0) != HAL_OK)
 	{
 	  Error_Handler();
 	}
+
+/*
+	CAN_FilterTypeDef sf_fifo1;
+		// All common bits go into the ID register
+	sf_fifo1.FilterIdHigh = 0xFFFF;
+	sf_fifo1.FilterIdLow = 0xFFFF;
+
+		// Which bits to compare for filter
+	sf_fifo1.FilterMaskIdHigh = 0xFFFF;
+	sf_fifo1.FilterMaskIdLow = 0xFFFF;
+
+	sf_fifo1.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+	sf_fifo1.FilterBank = 1; // Which filter to use from the assigned ones
+	sf_fifo1.FilterMode = CAN_FILTERMODE_IDMASK;
+	sf_fifo1.FilterScale = CAN_FILTERSCALE_32BIT;
+	sf_fifo1.FilterActivation = CAN_FILTER_ENABLE;
+	sf_fifo1.SlaveStartFilterBank = 14; // How many filters to assign to CAN1
+		if (HAL_CAN_ConfigFilter(&hcan1, &sf_fifo1) != HAL_OK)
+		{
+		  Error_Handler();
+		}
+*/
 
   	if (HAL_CAN_Start(&hcan1) != HAL_OK)
 	{
@@ -1314,44 +1412,8 @@ static void MX_CAN1_Init(void)
 		Error_Handler();
 	}
 
+
   /* USER CODE END CAN1_Init 2 */
-
-}
-
-/**
-  * @brief CAN2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_CAN2_Init(void)
-{
-
-  /* USER CODE BEGIN CAN2_Init 0 */
-
-  /* USER CODE END CAN2_Init 0 */
-
-  /* USER CODE BEGIN CAN2_Init 1 */
-
-  /* USER CODE END CAN2_Init 1 */
-  hcan2.Instance = CAN2;
-  hcan2.Init.Prescaler = 12;
-  hcan2.Init.Mode = CAN_MODE_NORMAL;
-  hcan2.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan2.Init.TimeSeg1 = CAN_BS1_11TQ;
-  hcan2.Init.TimeSeg2 = CAN_BS2_4TQ;
-  hcan2.Init.TimeTriggeredMode = DISABLE;
-  hcan2.Init.AutoBusOff = DISABLE;
-  hcan2.Init.AutoWakeUp = DISABLE;
-  hcan2.Init.AutoRetransmission = DISABLE;
-  hcan2.Init.ReceiveFifoLocked = DISABLE;
-  hcan2.Init.TransmitFifoPriority = DISABLE;
-  if (HAL_CAN_Init(&hcan2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN CAN2_Init 2 */
-
-  /* USER CODE END CAN2_Init 2 */
 
 }
 
@@ -1559,8 +1621,8 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(Speaker_GPIO_Port, Speaker_Pin, GPIO_PIN_RESET);
@@ -1633,8 +1695,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     	//GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
     	//ToggleLed(LED1);
     	//HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
-    	SetLed(LED1, 1);
+    	SetLed(LED2, 1);
     	led1_value = 1;
+
+    	pb2_value = 1;
+    	pb2_update = 1;
     }
     else if (GPIO_Pin == GPIO_PIN_15) // PD_15 -- PB1
     {
@@ -1643,8 +1708,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     	//GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
     	//ToggleLed(LED2);
     	//HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET);
-    	SetLed(LED2, 1);
+    	SetLed(LED3, 1);
     	led2_value = 1;
+
+    	pb1_value = 1;
+    	pb1_update = 1;
     }
 }
 
