@@ -147,6 +147,7 @@ CAN_HandleTypeDef hcan1;
 I2C_HandleTypeDef hi2c1;
 I2C_HandleTypeDef hi2c3;
 
+TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 
@@ -221,6 +222,7 @@ static void MX_ADC1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_CAN1_Init(void);
 static void MX_TIM4_Init(void);
+static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
 
 // State machine control
@@ -279,6 +281,23 @@ HAL_StatusTypeDef TransmitCAN(uint32_t id, uint8_t* buf, uint8_t size);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+
+void delay_us(uint16_t delay16_us)
+{
+	htim1.Instance->CNT = 0;
+	while (htim1.Instance->CNT < delay16_us);
+}
+
+void delay_ms(uint16_t delay16_ms)
+{
+	while(delay16_ms > 0)
+	{
+		htim1.Instance->CNT = 0;
+		delay16_ms--;
+		while (htim1.Instance->CNT < 1000);
+	}
+}
 
 
 HAL_StatusTypeDef GPIO_SendI2C(uint8_t addr, uint8_t reg, uint8_t data)
@@ -409,10 +428,13 @@ void DisableAllVoltages()
 	gpio1_gp0 = 0b11001100;
 	gpio1_gp1 = 0b11001100;
 	GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
+	delay_ms(10);
 	GPIO_SendI2C(GPIO1_ADDR, GPIO_GP1, gpio1_gp1);
+	delay_ms(10);
 
 	// Disable Volant 24V
 	DisableVolant24V();
+	delay_ms(10);
 }
 
 // board = 1,2,3,4
@@ -705,7 +727,7 @@ uint32_t DoStateInit()
 	InitGPIOs();
 	HAL_Delay(10);
 
-	DisableAllVoltages();
+	// DisableAllVoltages();
 	HAL_Delay(10);
 
 	InitAllINA226s();
@@ -882,6 +904,40 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan)
 	}
 }
 
+static void EnableAllVoltages()
+{
+	EnableVoltage(BOARD_C10_1, VOLTAGE_3V3);
+	delay_ms(5);
+	EnableVoltage(BOARD_C10_1, VOLTAGE_5V);
+	delay_ms(5);
+	EnableVoltage(BOARD_C10_1, VOLTAGE_24V);
+	delay_ms(5);
+
+	EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
+	delay_ms(5);
+	EnableVoltage(BOARD_C10_2, VOLTAGE_5V);
+	delay_ms(5);
+	EnableVoltage(BOARD_C10_2, VOLTAGE_24V);
+	delay_ms(5);
+
+	EnableVoltage(BOARD_C10_3, VOLTAGE_3V3);
+	delay_ms(5);
+	EnableVoltage(BOARD_C10_3, VOLTAGE_5V);
+	delay_ms(5);
+	EnableVoltage(BOARD_C10_3, VOLTAGE_24V);
+	delay_ms(5);
+
+	EnableVoltage(BOARD_C9, VOLTAGE_3V3);
+	delay_ms(5);
+	EnableVoltage(BOARD_C9, VOLTAGE_5V);
+	delay_ms(5);
+	EnableVoltage(BOARD_C9, VOLTAGE_24V);
+	delay_ms(5);
+
+	EnableVolant24V();
+	delay_ms(5);
+}
+
 
 /* USER CODE END 0 */
 
@@ -920,6 +976,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_CAN1_Init();
   MX_TIM4_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_TIM_Base_Start_IT(&htim4);
@@ -968,24 +1025,38 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 
   DoStateInit();
-
-  EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
-  EnableVoltage(BOARD_C10_2, VOLTAGE_5V);
-  EnableVoltage(BOARD_C10_2, VOLTAGE_24V);
+  delay_ms(5);
 
   EnableVoltage(BOARD_C10_1, VOLTAGE_3V3);
+  delay_ms(5);
   EnableVoltage(BOARD_C10_1, VOLTAGE_5V);
+  delay_ms(5);
   EnableVoltage(BOARD_C10_1, VOLTAGE_24V);
+  delay_ms(5);
+
+  EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
+  delay_ms(5);
+  EnableVoltage(BOARD_C10_2, VOLTAGE_5V);
+  delay_ms(5);
+  EnableVoltage(BOARD_C10_2, VOLTAGE_24V);
+  delay_ms(5);
 
   EnableVoltage(BOARD_C10_3, VOLTAGE_3V3);
+  delay_ms(5);
   EnableVoltage(BOARD_C10_3, VOLTAGE_5V);
+  delay_ms(5);
   EnableVoltage(BOARD_C10_3, VOLTAGE_24V);
+  delay_ms(5);
 
   EnableVoltage(BOARD_C9, VOLTAGE_3V3);
+  delay_ms(5);
   EnableVoltage(BOARD_C9, VOLTAGE_5V);
+  delay_ms(5);
   EnableVoltage(BOARD_C9, VOLTAGE_24V);
+  delay_ms(5);
 
   EnableVolant24V();
+  delay_ms(5);
 
   uint8_t buf1[4] = {0};
   uint8_t buf2[4] = {0};
@@ -1009,6 +1080,9 @@ int main(void)
 		  b_timer500ms_flag = 0;
 
 		  ToggleLed(LED1);
+
+		  // Making sure ?
+		  // EnableAllVoltages();
 	  }
 
 	  uint8_t buf[4];
@@ -1482,6 +1556,55 @@ static void MX_I2C3_Init(void)
   /* USER CODE BEGIN I2C3_Init 2 */
 
   /* USER CODE END I2C3_Init 2 */
+
+}
+
+/**
+  * @brief TIM1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM1_Init(void)
+{
+
+  /* USER CODE BEGIN TIM1_Init 0 */
+
+  /* USER CODE END TIM1_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM1_Init 1 */
+
+  /* USER CODE END TIM1_Init 1 */
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 47;
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 65535;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM1_Init 2 */
+
+  // Start the timer
+  HAL_TIM_Base_Start(&htim1);
+
+  /* USER CODE END TIM1_Init 2 */
 
 }
 
