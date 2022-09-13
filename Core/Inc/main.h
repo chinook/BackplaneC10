@@ -56,6 +56,8 @@ extern CAN_RxHeaderTypeDef pRxHeader;
 extern uint32_t txMailbox;
 
 extern uint8_t b_timer500ms_flag;
+extern uint8_t b_timer100ms_flag;
+extern uint8_t b_timer200ms_flag;
 
 /* USER CODE END EC */
 

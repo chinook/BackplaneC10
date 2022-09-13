@@ -150,12 +150,15 @@ I2C_HandleTypeDef hi2c3;
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
+TIM_HandleTypeDef htim5;
 
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
 uint8_t timer_flag;
+uint8_t b_acquisition_gpios_flag;
+uint8_t b_flag_can_tx;
 
 uint8_t pb1_pressed;
 uint8_t pb2_pressed;
@@ -171,7 +174,8 @@ uint8_t rxData[8];
 uint32_t txMailbox;
 
 // I2C GPIO registers
-uint8_t gpio0_gp0, gpio0_gp1, gpio1_gp0, gpio1_gp1;
+uint8_t gpio0_gp0, gpio0_gp1; // LEDs + Pre-Prog + 24V status
+uint8_t gpio1_gp0, gpio1_gp1; // Voltage enables
 uint8_t gpio0_dir0, gpio0_dir1, gpio1_dir0, gpio1_dir1;
 uint8_t gpio0_pol0, gpio0_pol1, gpio1_pol0, gpio1_pol1;
 
@@ -198,9 +202,18 @@ float volant_power = 0.0f;
 
 uint8_t volant_status = 1;  // 1 = no error,  0 = error
 
+// Feedback values of GPIOs
+uint8_t feedback_gpio0_gp0;
+uint8_t feedback_gpio0_gp1;
+uint8_t feedback_gpio1_gp0;
+uint8_t feedback_gpio1_gp1;
+uint8_t feedback_status_24V;
+
 uint8_t can_error = 0;
 
 uint8_t b_timer500ms_flag;
+uint8_t b_timer100ms_flag;
+uint8_t b_timer200ms_flag;
 
 
 // TEMP TEMP
@@ -223,6 +236,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_CAN1_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_TIM5_Init(void);
 /* USER CODE BEGIN PFP */
 
 // State machine control
@@ -242,6 +256,8 @@ HAL_StatusTypeDef INA_SendI2C(uint8_t addr, uint8_t reg, uint16_t data);
 uint16_t INA_ReadI2C(uint8_t addr, uint8_t reg);
 
 // GPIOs
+
+void EnableAllVoltages();
 
 void InitGPIOs();
 
@@ -402,19 +418,31 @@ void InitGPIOs()
 
   uint8_t error = 0;
   error |= GPIO_SendI2C(GPIO0_ADDR, GPIO_DIR_GP0, gpio0_dir0);
+  delay_us(5);
   error |= GPIO_SendI2C(GPIO0_ADDR, GPIO_DIR_GP1, gpio0_dir1);
+  delay_us(5);
   error |= GPIO_SendI2C(GPIO1_ADDR, GPIO_DIR_GP0, gpio1_dir0);
+  delay_us(5);
   error |= GPIO_SendI2C(GPIO1_ADDR, GPIO_DIR_GP1, gpio1_dir1);
+  delay_us(5);
 
   error |= GPIO_SendI2C(GPIO0_ADDR, GPIO_POL_GP0, gpio0_pol0);
+  delay_us(5);
   error |= GPIO_SendI2C(GPIO0_ADDR, GPIO_POL_GP1, gpio0_pol1);
+  delay_us(5);
   error |= GPIO_SendI2C(GPIO1_ADDR, GPIO_POL_GP0, gpio1_pol0);
+  delay_us(5);
   error |= GPIO_SendI2C(GPIO1_ADDR, GPIO_POL_GP1, gpio1_pol1);
+  delay_us(5);
 
   error |= GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+  delay_us(5);
   error |= GPIO_SendI2C(GPIO0_ADDR, GPIO_GP1, gpio0_gp1);
+  delay_us(5);
   error |= GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
+  delay_us(5);
   error |= GPIO_SendI2C(GPIO1_ADDR, GPIO_GP1, gpio1_gp1);
+  delay_us(5);
 
   if (error)
   {
@@ -679,6 +707,33 @@ float ReadPowerINA226(uint8_t ina226_id)
 
 void ExecuteStateMachine()
 {
+	// Blink LED to signify alive and working
+	if (b_timer500ms_flag)
+	{
+		b_timer500ms_flag = 0;
+
+		timer_flag = 1;
+	}
+	if (b_timer200ms_flag)
+	{
+		b_timer200ms_flag = 0;
+
+		b_acquisition_gpios_flag = 1;
+	}
+	if (b_timer100ms_flag)
+	{
+		b_timer100ms_flag = 0;
+
+		b_flag_can_tx = 1;
+	}
+
+	if (timer_flag)
+	{
+		timer_flag = 0;
+
+		ToggleLed(LED1);
+	}
+
 	switch (current_state)
 	{
 	case STATE_INIT:
@@ -713,6 +768,9 @@ uint32_t DoStateInit()
 {
 	// Init global variables
 	timer_flag = 0;
+	b_acquisition_gpios_flag = 0;
+	b_flag_can_tx = 0;
+
 	pb1_pressed = 0;
 	pb2_pressed = 0;
 
@@ -722,6 +780,8 @@ uint32_t DoStateInit()
 	can_error = 0;
 
 	b_timer500ms_flag = 0;
+	b_timer100ms_flag = 0;
+	b_timer200ms_flag = 0;
 
 	// Initialize GPIO values
 	InitGPIOs();
@@ -731,6 +791,14 @@ uint32_t DoStateInit()
 	HAL_Delay(10);
 
 	InitAllINA226s();
+
+	delay_ms(10);
+	EnableAllVoltages();
+	delay_ms(10);
+
+	// Start by verifying values of GPIOs
+	delay_ms(5);
+	b_acquisition_gpios_flag = 1;
 
 	return STATE_ACQUISITION;
 }
@@ -762,6 +830,72 @@ uint32_t DoStateAcquisition()
 
 	volant_status = HAL_GPIO_ReadPin(Volant_Status_GPIO_Port, Volant_Status_Pin);
 
+	// Verify values of GPIO expanders
+	if (b_acquisition_gpios_flag) // Executed every 200ms
+	{
+		b_acquisition_gpios_flag = 0;
+
+		/*
+		feedback_gpio0_gp0 = GPIO_ReadI2C(GPIO0_ADDR, GPIO_GP0);
+		delay_us(10);
+		feedback_gpio0_gp1 = GPIO_ReadI2C(GPIO0_ADDR, GPIO_GP1);
+		delay_us(10);
+		feedback_gpio1_gp0 = GPIO_ReadI2C(GPIO1_ADDR, GPIO_GP0);
+		delay_us(10);
+		feedback_gpio1_gp1 = GPIO_ReadI2C(GPIO1_ADDR, GPIO_GP1);
+		delay_us(10);
+
+		if (feedback_gpio0_gp0 != gpio0_gp0)
+		{
+			GPIO_SendI2C(GPIO0_ADDR, GPIO_GP0, gpio0_gp0);
+			delay_us(10);
+		}
+
+		if (feedback_gpio1_gp0 != gpio1_gp0)
+		{
+			GPIO_SendI2C(GPIO1_ADDR, GPIO_GP0, gpio1_gp0);
+			delay_us(10);
+		}
+		if (feedback_gpio1_gp1 != gpio1_gp1)
+		{
+			GPIO_SendI2C(GPIO1_ADDR, GPIO_GP1, gpio1_gp1);
+			delay_us(10);
+		}
+
+		// Verify 24V status
+		feedback_status_24V = (feedback_gpio0_gp1 & 0xF0) >> 4;
+		*/
+
+
+		/*
+		// Status at low = error on 24V
+		if ((feedback_status_24V & 0x1) == 0)
+		{
+			DisableVoltage(BOARD_C9, VOLTAGE_24V);
+			delay_us(10);
+			EnableVoltage(BOARD_C9, VOLTAGE_24V);
+		}
+		if ((feedback_status_24V & 0x2) == 0)
+		{
+			DisableVoltage(BOARD_C10_3, VOLTAGE_24V);
+			delay_us(10);
+			EnableVoltage(BOARD_C10_3, VOLTAGE_24V);
+		}
+		if ((feedback_status_24V & 0x4) == 0)
+		{
+			DisableVoltage(BOARD_C10_2, VOLTAGE_24V);
+			delay_us(10);
+			EnableVoltage(BOARD_C10_2, VOLTAGE_24V);
+		}
+		if ((feedback_status_24V & 0x8) == 0)
+		{
+			DisableVoltage(BOARD_C10_1, VOLTAGE_24V);
+			delay_us(10);
+			EnableVoltage(BOARD_C10_1, VOLTAGE_24V);
+		}
+		*/
+
+	}
 
 	return STATE_BOARD_CONTROL;
 }
@@ -779,9 +913,12 @@ uint32_t DoStateBoardControl()
 	*/
 
 	// TODO: (Marc) Don't resend every time, check if value has changed
-	EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
-	EnableVoltage(BOARD_C10_2, VOLTAGE_5V);
-	EnableVoltage(BOARD_C10_2, VOLTAGE_24V);
+	// EnableVoltage(BOARD_C10_2, VOLTAGE_3V3);
+	// EnableVoltage(BOARD_C10_2, VOLTAGE_5V);
+	// EnableVoltage(BOARD_C10_2, VOLTAGE_24V);
+
+	// Check that the values of GPIO expanders match expected values
+
 
 
 	return STATE_CAN;
@@ -790,44 +927,59 @@ uint32_t DoStateBoardControl()
 
 uint32_t DoStateCan()
 {
-	// Send all sensor values
-	HAL_StatusTypeDef can_success = HAL_OK;
-
-	/*
-	can_success &= TransmitCAN(BACKPLANE_TOTAL_VOLTAGE, (uint8_t*)(&batt_voltage), 4);
-	can_success &= TransmitCAN(BACKPLANE_TOTAL_CURRENT, (uint8_t*)(&batt_current), 4);
-
-	can_success &= TransmitCAN(BACKPLANE_VOLANT_VOLTAGE, (uint8_t*)(&volant_voltage), 4);
-	can_success &= TransmitCAN(BACKPLANE_VOLANT_CURRENT, (uint8_t*)(&volant_current), 4);
-
-	float board_voltages_1[2] = { board_voltages[0], board_voltages[1] };
-	can_success &= TransmitCAN(BACKPLANE_BOARD_VOLTAGES_1, (uint8_t*)(&board_voltages_1), 8);
-	float board_voltages_2[2] = { board_voltages[2], board_voltages[3] };
-	can_success &= TransmitCAN(BACKPLANE_BOARD_VOLTAGES_2, (uint8_t*)(&board_voltages_2), 8);
-
-	float board_currents_1[2] = { board_currents[0], board_currents[1] };
-	can_success &= TransmitCAN(BACKPLANE_BOARD_CURRENTS_1, (uint8_t*)(&board_currents_1), 8);
-	float board_currents_2[2] = { board_currents[2], board_currents[3] };
-	can_success &= TransmitCAN(BACKPLANE_BOARD_CURRENTS_2, (uint8_t*)(&board_currents_2), 8);
-
-	can_success &= TransmitCAN(BACKPLANE_BOARD_SLOTS_HS, board_hs, 4);
-
-	can_success &= TransmitCAN(BACKPLANE_VOLANT_STATUS, &volant_status, 1);
-	*/
-
-
-	/*
-	if (can_success != HAL_OK)
+	if (b_flag_can_tx)
 	{
-		SetLed(LED_ERROR, 1);
-		can_error = 1;
+		b_flag_can_tx = 0;
+
+		static uint32_t dummy_data_mario = 0;
+		++dummy_data_mario;
+		TransmitCAN(BACKPLANE_DUMMY_TRAFFIC_MARIO, (uint8_t*)&dummy_data_mario, 4);
+		delay_us(10);
+
+		static uint32_t dummy_data_drive = 10;
+		++dummy_data_drive;
+		TransmitCAN(BACKPLANE_DUMMY_TRAFFIC_DRIVE, (uint8_t*)&dummy_data_drive, 4);
+		delay_us(10);
+
+		// Send all sensor values
+		// HAL_StatusTypeDef can_success = HAL_OK;
+
+		/*
+		can_success &= TransmitCAN(BACKPLANE_TOTAL_VOLTAGE, (uint8_t*)(&batt_voltage), 4);
+		can_success &= TransmitCAN(BACKPLANE_TOTAL_CURRENT, (uint8_t*)(&batt_current), 4);
+
+		can_success &= TransmitCAN(BACKPLANE_VOLANT_VOLTAGE, (uint8_t*)(&volant_voltage), 4);
+		can_success &= TransmitCAN(BACKPLANE_VOLANT_CURRENT, (uint8_t*)(&volant_current), 4);
+
+		float board_voltages_1[2] = { board_voltages[0], board_voltages[1] };
+		can_success &= TransmitCAN(BACKPLANE_BOARD_VOLTAGES_1, (uint8_t*)(&board_voltages_1), 8);
+		float board_voltages_2[2] = { board_voltages[2], board_voltages[3] };
+		can_success &= TransmitCAN(BACKPLANE_BOARD_VOLTAGES_2, (uint8_t*)(&board_voltages_2), 8);
+
+		float board_currents_1[2] = { board_currents[0], board_currents[1] };
+		can_success &= TransmitCAN(BACKPLANE_BOARD_CURRENTS_1, (uint8_t*)(&board_currents_1), 8);
+		float board_currents_2[2] = { board_currents[2], board_currents[3] };
+		can_success &= TransmitCAN(BACKPLANE_BOARD_CURRENTS_2, (uint8_t*)(&board_currents_2), 8);
+
+		can_success &= TransmitCAN(BACKPLANE_BOARD_SLOTS_HS, board_hs, 4);
+
+		can_success &= TransmitCAN(BACKPLANE_VOLANT_STATUS, &volant_status, 1);
+		*/
+
+
+		/*
+		if (can_success != HAL_OK)
+		{
+			SetLed(LED_ERROR, 1);
+			can_error = 1;
+		}
+		else
+		{
+			SetLed(LED_ERROR, 0);
+			can_error = 0;
+		}
+		*/
 	}
-	else
-	{
-		SetLed(LED_ERROR, 0);
-		can_error = 0;
-	}
-	*/
 
 	return STATE_ACQUISITION;
 }
@@ -904,7 +1056,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan)
 	}
 }
 
-static void EnableAllVoltages()
+void EnableAllVoltages()
 {
 	EnableVoltage(BOARD_C10_1, VOLTAGE_3V3);
 	delay_ms(5);
@@ -977,6 +1129,7 @@ int main(void)
   MX_CAN1_Init();
   MX_TIM4_Init();
   MX_TIM1_Init();
+  MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_TIM_Base_Start_IT(&htim4);
@@ -1058,6 +1211,17 @@ int main(void)
   EnableVolant24V();
   delay_ms(5);
 
+
+  current_state = STATE_INIT;
+  while (1)
+  {
+	  ExecuteStateMachine();
+
+	  // TODO: (Marc) Should be replaced by a timer with better resolution
+	  HAL_Delay(5);
+  }
+
+
   uint8_t buf1[4] = {0};
   uint8_t buf2[4] = {0};
   uint32_t buf1_val = 0x200;
@@ -1085,6 +1249,7 @@ int main(void)
 		  // EnableAllVoltages();
 	  }
 
+	  /*
 	  uint8_t buf[4];
 
 	  if(GPIO_PIN_SET == HAL_GPIO_ReadPin(PB2_GPIO_Port, PB2_Pin)) // PD_14 -- PB2
@@ -1128,6 +1293,7 @@ int main(void)
 		  TransmitCAN(0x71, buf, 4);
 		  pb2_update = 0;
 	  }
+	  */
   }
 
   while (1)
@@ -1181,22 +1347,6 @@ int main(void)
   }
 
   //HAL_StatusTypeDef ret;
-  current_state = STATE_INIT;
-  while (1)
-  {
-	  ExecuteStateMachine();
-
-	  // TODO: (Marc) Should be replaced by a timer with better resolution
-	  HAL_Delay(5);
-
-	  // Blink LED to signify alive and working
-	  if (timer_flag)
-	  {
-		  timer_flag = 0;
-
-		  ToggleLed(LED1);
-	  }
-  }
 
   while (1)
   {
@@ -1399,7 +1549,7 @@ static void MX_CAN1_Init(void)
   hcan1.Init.TimeSeg1 = CAN_BS1_11TQ;
   hcan1.Init.TimeSeg2 = CAN_BS2_4TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
-  hcan1.Init.AutoBusOff = DISABLE;
+  hcan1.Init.AutoBusOff = ENABLE;
   hcan1.Init.AutoWakeUp = DISABLE;
   hcan1.Init.AutoRetransmission = DISABLE;
   hcan1.Init.ReceiveFifoLocked = DISABLE;
@@ -1627,9 +1777,9 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 160;
+  htim3.Init.Prescaler = 480;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 20000;
+  htim3.Init.Period = 10000;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -1695,6 +1845,51 @@ static void MX_TIM4_Init(void)
   /* USER CODE BEGIN TIM4_Init 2 */
 
   /* USER CODE END TIM4_Init 2 */
+
+}
+
+/**
+  * @brief TIM5 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM5_Init(void)
+{
+
+  /* USER CODE BEGIN TIM5_Init 0 */
+
+  /* USER CODE END TIM5_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM5_Init 1 */
+
+  /* USER CODE END TIM5_Init 1 */
+  htim5.Instance = TIM5;
+  htim5.Init.Prescaler = 480;
+  htim5.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim5.Init.Period = 20000;
+  htim5.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim5.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim5) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim5, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim5, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM5_Init 2 */
+
+  /* USER CODE END TIM5_Init 2 */
 
 }
 
