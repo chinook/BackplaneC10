@@ -1013,8 +1013,9 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan)
 			Error_Handler();
 		}
 
-		uint32_t can_data = rxData[0] | (rxData[1] << 8) | (rxData[2] << 16) | (rxData[3] << 24);
+		// uint32_t can_data = rxData[0] | (rxData[1] << 8) | (rxData[2] << 16) | (rxData[3] << 24);
 
+		/*
 		if (pRxHeader.StdId == MARIO_PITCH_MANUAL_CMD) // 0x71
 		{
 			if (can_data == 0x300)
@@ -1031,7 +1032,8 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan)
 				SetLed(LED4, 0);
 			}
 		}
-		else if (pRxHeader.StdId == MARIO_BUZZER_CMD) // 0x81
+		*/
+		if (pRxHeader.StdId == MARIO_BUZZER_CMD) // 0x81
 		{
 			ToggleLed(LED2);
 		}
