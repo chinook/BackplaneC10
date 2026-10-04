@@ -95,9 +95,10 @@
 #define MARIO_FIFO1_RX_FILTER_MASK_LOW  0xFFE0
 
 
-//
+
 // Volant RX CAN messages  --  0x40 -> 0x5F
-//
+// #define CAN_ID_BACKPLANE_BATT_PERCENT 0x50  // Backplane -> Volant : % batterie 3S LiPo
+
 
 // Volant FIFO0 - Priority
 

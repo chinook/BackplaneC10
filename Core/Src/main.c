@@ -931,6 +931,7 @@ uint32_t DoStateCan()
 	{
 		b_flag_can_tx = 0;
 
+		/* BLOC FACTICE
 		static uint32_t dummy_data_mario = 0;
 		++dummy_data_mario;
 		TransmitCAN(BACKPLANE_DUMMY_TRAFFIC_MARIO, (uint8_t*)&dummy_data_mario, 4);
@@ -940,6 +941,22 @@ uint32_t DoStateCan()
 		++dummy_data_drive;
 		TransmitCAN(BACKPLANE_DUMMY_TRAFFIC_DRIVE, (uint8_t*)&dummy_data_drive, 4);
 		delay_us(10);
+		*/
+
+		/*
+		// Calculs + l'envoi vers le volant du pourcentage de la batterie
+		float batt_percent = (batt_voltage - 10.5f) / (12.6f - 10.5f) * 100;
+		if(batt_percent > 100.0f) {
+			batt_percent = 100.0f;
+		}
+
+		if(batt_percent < 0.0f){
+			batt_percent = 0.0f;
+		}
+
+		TransmitCAN(CAN_ID_BACKPLANE_BATT_PERCENT, (uint8_t*)&batt_percent, 4);
+		delay_us(10);
+		*/
 
 		// Send all sensor values
 		// HAL_StatusTypeDef can_success = HAL_OK;
